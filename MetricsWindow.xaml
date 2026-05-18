@@ -1,0 +1,23 @@
+<Window x:Class="ProductivityApp.MetricsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Metrics" Height="620" Width="820" MinHeight="500" MinWidth="680"
+        WindowStartupLocation="CenterOwner" Background="#F6F7F9">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,14">
+            <TextBlock Text="Closed App Metrics" FontSize="24" FontWeight="SemiBold" Foreground="#242A31"/>
+            <Button DockPanel.Dock="Right" Content="Refresh" Width="92" Height="32" Click="RefreshButton_Click"/>
+        </DockPanel>
+
+        <Border Grid.Row="1" Background="#FFFFFF" BorderBrush="#DDE2EA" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel x:Name="MetricsPanel" Margin="14"/>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Window>
