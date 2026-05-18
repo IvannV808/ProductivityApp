@@ -75,6 +75,22 @@ public static class AppDataStore
         }
     }
 
+    public static void UpdateScheduledBlock(ScheduledBlock block)
+    {
+        lock (SyncLock)
+        {
+            ProductivityDatabase database = LoadProductivityDatabase();
+            int index = database.ScheduledBlocks.FindIndex(existing =>
+                string.Equals(existing.Id, block.Id, StringComparison.OrdinalIgnoreCase));
+
+            if (index >= 0)
+            {
+                database.ScheduledBlocks[index] = block;
+                Save(ProductivityDataPath, database);
+            }
+        }
+    }
+
     public static IReadOnlyList<AppClosureEvent> GetClosureEvents()
     {
         lock (SyncLock)

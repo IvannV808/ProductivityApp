@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 
@@ -8,6 +9,12 @@ namespace ProductivityApp;
 
 public partial class MainWindow : Window
 {
+    private const double HeaderHeight = 42;
+    private const double SlotHeight = 26;
+    private const double TimeColumnWidth = 76;
+    private const double BlockWidthRatio = 0.78;
+    private const double ResizeEdgeSize = 7;
+
     private static readonly DayOfWeek[] ScheduleDays =
     [
         DayOfWeek.Monday,
@@ -35,6 +42,8 @@ public partial class MainWindow : Window
 
     private readonly DispatcherTimer _blockTimer;
     private readonly HashSet<string> _activeCloseAttempts = [];
+    private List<ScheduledBlock> _scheduledBlocks = [];
+    private BlockDragState? _activeDrag;
     private int _nextColorIndex;
 
     public MainWindow()
@@ -73,22 +82,28 @@ public partial class MainWindow : Window
 
     private void RenderSchedule()
     {
+        _scheduledBlocks = AppDataStore.GetScheduledBlocks().ToList();
+
         ScheduleGrid.Children.Clear();
         ScheduleGrid.RowDefinitions.Clear();
         ScheduleGrid.ColumnDefinitions.Clear();
+        BlockCanvas.Children.Clear();
 
         for (int column = 0; column < ScheduleDays.Length; column++)
         {
-            ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 130 });
         }
 
-        ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(88) });
-        ScheduleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(42) });
+        ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TimeColumnWidth) });
+        ScheduleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(HeaderHeight) });
 
         for (int slot = 0; slot < 96; slot++)
         {
-            ScheduleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(26) });
+            ScheduleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(SlotHeight) });
         }
+
+        ScheduleHost.Height = HeaderHeight + (96 * SlotHeight);
+        BlockCanvas.Height = ScheduleHost.Height;
 
         for (int dayIndex = 0; dayIndex < DayLabels.Length; dayIndex++)
         {
@@ -130,12 +145,9 @@ public partial class MainWindow : Window
             ScheduleGrid.Children.Add(timeLabel);
         }
 
-        foreach (ScheduledBlock block in AppDataStore.GetScheduledBlocks())
-        {
-            RenderScheduledBlock(block);
-        }
-
-        StatusText.Text = $"{AppDataStore.GetScheduledBlocks().Count} scheduled blocks active";
+        ScheduleGrid.UpdateLayout();
+        RenderBlockOverlays();
+        StatusText.Text = $"{_scheduledBlocks.Count} scheduled blocks active";
     }
 
     private static Button CreateSlotButton(DayOfWeek day, int startMinutes)
@@ -147,7 +159,7 @@ public partial class MainWindow : Window
             BorderThickness = new Thickness(0.5),
             Padding = new Thickness(0),
             Tag = new ScheduleSlot(day, startMinutes),
-            Cursor = System.Windows.Input.Cursors.Hand
+            Cursor = Cursors.Hand
         };
         button.Click += SlotButton_Click;
         return button;
@@ -179,7 +191,94 @@ public partial class MainWindow : Window
         RenderSchedule();
     }
 
-    private void RenderScheduledBlock(ScheduledBlock block)
+    private void OpenEditScheduleBlockWindow(ScheduledBlock block)
+    {
+        ScheduleBlockWindow window = new(CloneScheduledBlock(block))
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() != true || window.ScheduledBlock is null)
+        {
+            return;
+        }
+
+        AppDataStore.UpdateScheduledBlock(window.ScheduledBlock);
+        RenderSchedule();
+    }
+
+    private void ScheduleGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RenderBlockOverlays();
+    }
+
+    private void RenderBlockOverlays()
+    {
+        if (ScheduleGrid.ColumnDefinitions.Count == 0 || ScheduleGrid.ActualWidth <= 0)
+        {
+            return;
+        }
+
+        BlockCanvas.Width = ScheduleGrid.ActualWidth;
+        BlockCanvas.Children.Clear();
+
+        Dictionary<string, BlockLayout> layouts = BuildBlockLayouts(_scheduledBlocks);
+        foreach (ScheduledBlock block in _scheduledBlocks)
+        {
+            if (!layouts.TryGetValue(block.Id, out BlockLayout? layout))
+            {
+                continue;
+            }
+
+            Border blockPanel = CreateBlockPanel(block, layout);
+            PositionBlockPanel(blockPanel, block, layout);
+            BlockCanvas.Children.Add(blockPanel);
+        }
+    }
+
+    private Border CreateBlockPanel(ScheduledBlock block, BlockLayout layout)
+    {
+        Color color = (Color)ColorConverter.ConvertFromString(block.ColorHex);
+        Border blockPanel = new()
+        {
+            Background = new SolidColorBrush(Color.FromArgb(224, color.R, color.G, color.B)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(83, 91, 105)),
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(6, 3, 6, 3),
+            CornerRadius = new CornerRadius(4),
+            Cursor = Cursors.SizeAll,
+            Tag = new BlockElementState(block, layout),
+            Child = CreateBlockText(block)
+        };
+
+        MenuItem editItem = new()
+        {
+            Header = "Edit"
+        };
+        editItem.Click += (_, _) => OpenEditScheduleBlockWindow(block);
+        blockPanel.ContextMenu = new ContextMenu
+        {
+            Items = { editItem }
+        };
+
+        blockPanel.MouseMove += BlockPanel_MouseMove;
+        blockPanel.MouseLeftButtonDown += BlockPanel_MouseLeftButtonDown;
+        blockPanel.MouseLeftButtonUp += BlockPanel_MouseLeftButtonUp;
+        return blockPanel;
+    }
+
+    private static TextBlock CreateBlockText(ScheduledBlock block)
+    {
+        return new TextBlock
+        {
+            Text = $"{block.TimeRangeText}\n{string.Join(", ", block.TargetProcessNames)}",
+            TextWrapping = TextWrapping.Wrap,
+            FontSize = 11,
+            Foreground = new SolidColorBrush(Color.FromRgb(24, 29, 36))
+        };
+    }
+
+    private void PositionBlockPanel(Border blockPanel, ScheduledBlock block, BlockLayout layout)
     {
         int dayColumn = Array.IndexOf(ScheduleDays, block.Day);
         if (dayColumn < 0)
@@ -187,42 +286,254 @@ public partial class MainWindow : Window
             return;
         }
 
-        int startSlot = Math.Clamp(block.StartMinutes / 15, 0, 95);
-        int endSlot = Math.Clamp((int)Math.Ceiling(block.EndMinutes / 15.0), startSlot + 1, 96);
-        int rowSpan = Math.Max(1, endSlot - startSlot);
-        Color color = (Color)ColorConverter.ConvertFromString(block.ColorHex);
+        double columnLeft = GetColumnLeft(dayColumn);
+        double columnWidth = ScheduleGrid.ColumnDefinitions[dayColumn].ActualWidth;
+        double laneAreaWidth = Math.Max(48, columnWidth * BlockWidthRatio);
+        double laneWidth = Math.Max(36, laneAreaWidth / Math.Max(1, layout.LaneCount));
+        double left = columnLeft + (layout.Lane * laneWidth) + 3;
+        double top = HeaderHeight + ((block.StartMinutes / 15.0) * SlotHeight) + 2;
+        double height = Math.Max(SlotHeight - 4, ((block.EndMinutes - block.StartMinutes) / 15.0 * SlotHeight) - 4);
+        double width = Math.Max(32, laneWidth - 6);
 
-        Border blockPanel = new()
+        Canvas.SetLeft(blockPanel, left);
+        Canvas.SetTop(blockPanel, top);
+        blockPanel.Width = width;
+        blockPanel.Height = height;
+        blockPanel.ToolTip = $"{block.TimeRangeText}\n{string.Join(", ", block.TargetProcessNames)}";
+
+        if (blockPanel.Child is TextBlock textBlock)
         {
-            Background = new SolidColorBrush(Color.FromArgb(210, color.R, color.G, color.B)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(83, 91, 105)),
-            BorderThickness = new Thickness(1),
-            Margin = new Thickness(3),
-            Padding = new Thickness(6, 3, 6, 3),
-            CornerRadius = new CornerRadius(4),
-            ToolTip = $"{block.TimeRangeText}\n{string.Join(", ", block.TargetProcessNames)}",
-            IsHitTestVisible = false,
-            Child = new TextBlock
-            {
-                Text = $"{block.TimeRangeText}\n{string.Join(", ", block.TargetProcessNames)}",
-                TextWrapping = TextWrapping.Wrap,
-                FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(24, 29, 36))
-            }
-        };
+            textBlock.Text = $"{block.TimeRangeText}\n{string.Join(", ", block.TargetProcessNames)}";
+        }
+    }
 
-        Grid.SetColumn(blockPanel, dayColumn);
-        Grid.SetRow(blockPanel, startSlot + 1);
-        Grid.SetRowSpan(blockPanel, rowSpan);
-        Panel.SetZIndex(blockPanel, 5);
-        ScheduleGrid.Children.Add(blockPanel);
+    private void BlockPanel_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not Border blockPanel ||
+            blockPanel.Tag is not BlockElementState state)
+        {
+            return;
+        }
+
+        Point positionInBlock = e.GetPosition(blockPanel);
+        BlockDragMode mode = GetDragMode(positionInBlock, blockPanel.ActualHeight);
+        ScheduledBlock block = state.Block;
+
+        _activeDrag = new BlockDragState(
+            block,
+            blockPanel,
+            state.Layout,
+            mode,
+            e.GetPosition(BlockCanvas),
+            block.Day,
+            block.StartMinutes,
+            block.EndMinutes);
+
+        blockPanel.CaptureMouse();
+        e.Handled = true;
+    }
+
+    private void BlockPanel_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (sender is not Border blockPanel ||
+            blockPanel.Tag is not BlockElementState state)
+        {
+            return;
+        }
+
+        if (_activeDrag is null || !ReferenceEquals(_activeDrag.Element, blockPanel) || e.LeftButton != MouseButtonState.Pressed)
+        {
+            Point hoverPoint = e.GetPosition(blockPanel);
+            blockPanel.Cursor = GetDragMode(hoverPoint, blockPanel.ActualHeight) == BlockDragMode.Move
+                ? Cursors.SizeAll
+                : Cursors.SizeNS;
+            return;
+        }
+
+        Point currentPoint = e.GetPosition(BlockCanvas);
+        int slotDelta = (int)Math.Round((currentPoint.Y - _activeDrag.StartPointer.Y) / SlotHeight);
+        int minuteDelta = slotDelta * 15;
+        ScheduledBlock block = _activeDrag.Block;
+
+        switch (_activeDrag.Mode)
+        {
+            case BlockDragMode.Move:
+                int duration = _activeDrag.OriginalEndMinutes - _activeDrag.OriginalStartMinutes;
+                int newStart = ClampToSlot(_activeDrag.OriginalStartMinutes + minuteDelta, 0, 24 * 60 - duration);
+                block.StartMinutes = newStart;
+                block.EndMinutes = newStart + duration;
+                block.Day = GetDayFromX(currentPoint.X) ?? _activeDrag.OriginalDay;
+                break;
+
+            case BlockDragMode.ResizeTop:
+                block.StartMinutes = ClampToSlot(
+                    _activeDrag.OriginalStartMinutes + minuteDelta,
+                    0,
+                    _activeDrag.OriginalEndMinutes - 15);
+                block.EndMinutes = _activeDrag.OriginalEndMinutes;
+                break;
+
+            case BlockDragMode.ResizeBottom:
+                block.StartMinutes = _activeDrag.OriginalStartMinutes;
+                block.EndMinutes = ClampToSlot(
+                    _activeDrag.OriginalEndMinutes + minuteDelta,
+                    _activeDrag.OriginalStartMinutes + 15,
+                    24 * 60);
+                break;
+        }
+
+        PositionBlockPanel(blockPanel, block, state.Layout);
+        e.Handled = true;
+    }
+
+    private void BlockPanel_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        if (_activeDrag is null || sender is not Border blockPanel)
+        {
+            return;
+        }
+
+        blockPanel.ReleaseMouseCapture();
+        AppDataStore.UpdateScheduledBlock(_activeDrag.Block);
+        _activeDrag = null;
+        RenderSchedule();
+        e.Handled = true;
+    }
+
+    private static BlockDragMode GetDragMode(Point point, double blockHeight)
+    {
+        if (point.Y <= ResizeEdgeSize)
+        {
+            return BlockDragMode.ResizeTop;
+        }
+
+        if (blockHeight - point.Y <= ResizeEdgeSize)
+        {
+            return BlockDragMode.ResizeBottom;
+        }
+
+        return BlockDragMode.Move;
+    }
+
+    private DayOfWeek? GetDayFromX(double x)
+    {
+        for (int dayIndex = 0; dayIndex < ScheduleDays.Length; dayIndex++)
+        {
+            double left = GetColumnLeft(dayIndex);
+            double right = left + ScheduleGrid.ColumnDefinitions[dayIndex].ActualWidth;
+            if (x >= left && x <= right)
+            {
+                return ScheduleDays[dayIndex];
+            }
+        }
+
+        return null;
+    }
+
+    private double GetColumnLeft(int columnIndex)
+    {
+        double left = 0;
+        for (int column = 0; column < columnIndex; column++)
+        {
+            left += ScheduleGrid.ColumnDefinitions[column].ActualWidth;
+        }
+
+        return left;
+    }
+
+    private static int ClampToSlot(int minutes, int minMinutes, int maxMinutes)
+    {
+        int snapped = (int)Math.Round(minutes / 15.0) * 15;
+        return Math.Clamp(snapped, minMinutes, maxMinutes);
+    }
+
+    private static Dictionary<string, BlockLayout> BuildBlockLayouts(IReadOnlyList<ScheduledBlock> blocks)
+    {
+        Dictionary<string, BlockLayout> layouts = [];
+
+        foreach (IGrouping<DayOfWeek, ScheduledBlock> dayGroup in blocks.GroupBy(block => block.Day))
+        {
+            List<ScheduledBlock> sortedBlocks = dayGroup
+                .OrderBy(block => block.StartMinutes)
+                .ThenBy(block => block.EndMinutes)
+                .ToList();
+
+            List<ScheduledBlock> currentGroup = [];
+            int currentGroupEnd = -1;
+
+            foreach (ScheduledBlock block in sortedBlocks)
+            {
+                if (currentGroup.Count == 0 || block.StartMinutes < currentGroupEnd)
+                {
+                    currentGroup.Add(block);
+                    currentGroupEnd = Math.Max(currentGroupEnd, block.EndMinutes);
+                    continue;
+                }
+
+                AddLayoutsForOverlapGroup(currentGroup, layouts);
+                currentGroup = [block];
+                currentGroupEnd = block.EndMinutes;
+            }
+
+            AddLayoutsForOverlapGroup(currentGroup, layouts);
+        }
+
+        return layouts;
+    }
+
+    private static void AddLayoutsForOverlapGroup(List<ScheduledBlock> group, Dictionary<string, BlockLayout> layouts)
+    {
+        if (group.Count == 0)
+        {
+            return;
+        }
+
+        List<int> laneEnds = [];
+        Dictionary<string, int> assignedLanes = [];
+
+        foreach (ScheduledBlock block in group.OrderBy(block => block.StartMinutes).ThenBy(block => block.EndMinutes))
+        {
+            int lane = laneEnds.FindIndex(endMinutes => endMinutes <= block.StartMinutes);
+            if (lane < 0)
+            {
+                lane = laneEnds.Count;
+                laneEnds.Add(block.EndMinutes);
+            }
+            else
+            {
+                laneEnds[lane] = block.EndMinutes;
+            }
+
+            assignedLanes[block.Id] = lane;
+        }
+
+        int laneCount = Math.Max(1, laneEnds.Count);
+        foreach (ScheduledBlock block in group)
+        {
+            layouts[block.Id] = new BlockLayout(assignedLanes[block.Id], laneCount);
+        }
+    }
+
+    private static ScheduledBlock CloneScheduledBlock(ScheduledBlock block)
+    {
+        return new ScheduledBlock
+        {
+            Id = block.Id,
+            Day = block.Day,
+            StartMinutes = block.StartMinutes,
+            EndMinutes = block.EndMinutes,
+            TargetProcessNames = [.. block.TargetProcessNames],
+            ColorHex = block.ColorHex,
+            CreatedAt = block.CreatedAt
+        };
     }
 
     private async void BlockTimer_Tick(object? sender, EventArgs e)
     {
         DateTime now = DateTime.Now;
         int currentMinutes = (now.Hour * 60) + now.Minute;
-        string currentProcessName = Process.GetCurrentProcess().ProcessName;
+        using Process currentProcess = Process.GetCurrentProcess();
+        string currentProcessName = currentProcess.ProcessName;
 
         List<ScheduledBlock> activeBlocks = AppDataStore.GetScheduledBlocks()
             .Where(block => block.Day == now.DayOfWeek &&
@@ -324,3 +635,24 @@ public partial class MainWindow : Window
 }
 
 public sealed record ScheduleSlot(DayOfWeek Day, int StartMinutes);
+
+public sealed record BlockLayout(int Lane, int LaneCount);
+
+public sealed record BlockElementState(ScheduledBlock Block, BlockLayout Layout);
+
+public sealed record BlockDragState(
+    ScheduledBlock Block,
+    Border Element,
+    BlockLayout Layout,
+    BlockDragMode Mode,
+    Point StartPointer,
+    DayOfWeek OriginalDay,
+    int OriginalStartMinutes,
+    int OriginalEndMinutes);
+
+public enum BlockDragMode
+{
+    Move,
+    ResizeTop,
+    ResizeBottom
+}

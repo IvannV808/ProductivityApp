@@ -25,11 +25,11 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Start time" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                <TextBox x:Name="StartTimeBox" Height="34" VerticalContentAlignment="Center"/>
+                <ComboBox x:Name="StartTimeCombo" Height="34"/>
             </StackPanel>
             <StackPanel Grid.Column="2">
                 <TextBlock Text="End time" FontWeight="SemiBold" Margin="0,0,0,6"/>
-                <TextBox x:Name="EndTimeBox" Height="34" VerticalContentAlignment="Center"/>
+                <ComboBox x:Name="EndTimeCombo" Height="34"/>
             </StackPanel>
         </Grid>
 

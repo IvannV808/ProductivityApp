@@ -45,8 +45,11 @@
             </DockPanel>
 
             <Border Grid.Row="1" Background="#FFFFFF" BorderBrush="#DDE2EA" BorderThickness="1">
-                <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <Grid x:Name="ScheduleGrid"/>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                    <Grid x:Name="ScheduleHost" MinWidth="1010">
+                        <Grid x:Name="ScheduleGrid" SizeChanged="ScheduleGrid_SizeChanged"/>
+                        <Canvas x:Name="BlockCanvas"/>
+                    </Grid>
                 </ScrollViewer>
             </Border>
         </Grid>
