@@ -5,19 +5,24 @@ using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using MediaColor = System.Windows.Media.Color;
+using WpfBinding = System.Windows.Data.Binding;
+using WpfDataGrid = System.Windows.Controls.DataGrid;
+using WpfOrientation = System.Windows.Controls.Orientation;
+using WpfPoint = System.Windows.Point;
 
 namespace ProductivityApp;
 
 public partial class MetricsWindow : Window
 {
-    private static readonly Color[] SeriesColors =
+    private static readonly MediaColor[] SeriesColors =
     [
-        Color.FromRgb(37, 99, 235),
-        Color.FromRgb(22, 163, 74),
-        Color.FromRgb(217, 119, 6),
-        Color.FromRgb(147, 51, 234),
-        Color.FromRgb(220, 38, 38),
-        Color.FromRgb(8, 145, 178)
+        MediaColor.FromRgb(37, 99, 235),
+        MediaColor.FromRgb(22, 163, 74),
+        MediaColor.FromRgb(217, 119, 6),
+        MediaColor.FromRgb(147, 51, 234),
+        MediaColor.FromRgb(220, 38, 38),
+        MediaColor.FromRgb(8, 145, 178)
     ];
 
     private readonly List<SelectableMetricApp> _metricApps = [];
@@ -198,7 +203,7 @@ public partial class MetricsWindow : Window
             {
                 double x = leftPadding + (_chartBuckets.Count == 1 ? plotWidth / 2 : index * (plotWidth / (_chartBuckets.Count - 1)));
                 double y = topPadding + plotHeight - ((series.Values[index] / (double)maxSeconds) * plotHeight);
-                line.Points.Add(new Point(x, y));
+                line.Points.Add(new WpfPoint(x, y));
 
                 Ellipse point = new()
                 {
@@ -223,7 +228,7 @@ public partial class MetricsWindow : Window
             {
                 Text = _chartBuckets[index].ShortLabel,
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(101, 112, 128))
+                Foreground = new SolidColorBrush(MediaColor.FromRgb(101, 112, 128))
             };
             Canvas.SetLeft(label, x - 24);
             Canvas.SetTop(label, topPadding + plotHeight + 10);
@@ -233,7 +238,7 @@ public partial class MetricsWindow : Window
 
     private void DrawAxis(double left, double top, double width, double height, int maxSeconds)
     {
-        SolidColorBrush axisBrush = new(Color.FromRgb(188, 197, 208));
+        SolidColorBrush axisBrush = new(MediaColor.FromRgb(188, 197, 208));
         UsageChartCanvas.Children.Add(new Line { X1 = left, X2 = left, Y1 = top, Y2 = top + height, Stroke = axisBrush, StrokeThickness = 1 });
         UsageChartCanvas.Children.Add(new Line { X1 = left, X2 = left + width, Y1 = top + height, Y2 = top + height, Stroke = axisBrush, StrokeThickness = 1 });
 
@@ -247,7 +252,7 @@ public partial class MetricsWindow : Window
                 X2 = left + width,
                 Y1 = y,
                 Y2 = y,
-                Stroke = new SolidColorBrush(Color.FromRgb(232, 236, 242)),
+                Stroke = new SolidColorBrush(MediaColor.FromRgb(232, 236, 242)),
                 StrokeThickness = 1
             });
 
@@ -255,7 +260,7 @@ public partial class MetricsWindow : Window
             {
                 Text = FormatDuration(seconds),
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(101, 112, 128))
+                Foreground = new SolidColorBrush(MediaColor.FromRgb(101, 112, 128))
             };
             Canvas.SetLeft(label, 4);
             Canvas.SetTop(label, y - 8);
@@ -263,11 +268,11 @@ public partial class MetricsWindow : Window
         }
     }
 
-    private void AddLegendItem(string name, Color color)
+    private void AddLegendItem(string name, MediaColor color)
     {
         StackPanel item = new()
         {
-            Orientation = Orientation.Horizontal,
+            Orientation = WpfOrientation.Horizontal,
             Margin = new Thickness(0, 0, 18, 0)
         };
         item.Children.Add(new Border
@@ -280,7 +285,7 @@ public partial class MetricsWindow : Window
         item.Children.Add(new TextBlock
         {
             Text = name,
-            Foreground = new SolidColorBrush(Color.FromRgb(36, 42, 49))
+            Foreground = new SolidColorBrush(MediaColor.FromRgb(36, 42, 49))
         });
         LegendPanel.Children.Add(item);
     }
@@ -295,7 +300,7 @@ public partial class MetricsWindow : Window
             ClosureMetricsPanel.Children.Add(new TextBlock
             {
                 Text = "No apps have been closed by a scheduled block yet.",
-                Foreground = new SolidColorBrush(Color.FromRgb(101, 112, 128)),
+                Foreground = new SolidColorBrush(MediaColor.FromRgb(101, 112, 128)),
                 FontSize = 15,
                 Margin = new Thickness(0, 4, 0, 0)
             });
@@ -313,11 +318,11 @@ public partial class MetricsWindow : Window
                 Text = $"{dayGroup.Key:dddd, MMM d, yyyy}",
                 FontSize = 17,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(36, 42, 49)),
+                Foreground = new SolidColorBrush(MediaColor.FromRgb(36, 42, 49)),
                 Margin = new Thickness(0, 8, 0, 8)
             });
 
-            DataGrid grid = new()
+            WpfDataGrid grid = new()
             {
                 AutoGenerateColumns = false,
                 HeadersVisibility = DataGridHeadersVisibility.Column,
@@ -337,10 +342,10 @@ public partial class MetricsWindow : Window
                     .ToList()
             };
 
-            grid.Columns.Add(new DataGridTextColumn { Header = "App", Binding = new Binding("DisplayName"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Process", Binding = new Binding("ProcessName"), Width = new DataGridLength(160) });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Closed", Binding = new Binding("ClosedCount"), Width = new DataGridLength(90) });
-            grid.Columns.Add(new DataGridTextColumn { Header = "Last closed", Binding = new Binding("LastClosed"), Width = new DataGridLength(120) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "App", Binding = new WpfBinding("DisplayName"), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Process", Binding = new WpfBinding("ProcessName"), Width = new DataGridLength(160) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Closed", Binding = new WpfBinding("ClosedCount"), Width = new DataGridLength(90) });
+            grid.Columns.Add(new DataGridTextColumn { Header = "Last closed", Binding = new WpfBinding("LastClosed"), Width = new DataGridLength(120) });
 
             ClosureMetricsPanel.Children.Add(grid);
         }
@@ -389,8 +394,8 @@ public partial class MetricsWindow : Window
 
         TimeSpan duration = TimeSpan.FromSeconds(seconds);
         return duration.TotalHours >= 1
-            ? $"{(int)duration.TotalHours}h {duration.Minutes}m"
-            : $"{duration.Minutes}m";
+            ? $"{(int)duration.TotalHours}h {duration.Minutes}m {duration.Seconds:D2}s"
+            : $"{duration.Minutes}m {duration.Seconds:D2}s";
     }
 }
 
@@ -428,7 +433,7 @@ public sealed class SelectableMetricApp : INotifyPropertyChanged
 
 public sealed record UsageBucket(DateOnly StartDate, string Label, string ShortLabel);
 
-public sealed record UsageChartSeries(string DisplayName, string ProcessName, Color Color, List<int> Values);
+public sealed record UsageChartSeries(string DisplayName, string ProcessName, MediaColor Color, List<int> Values);
 
 public sealed record UsageTotalRow(string Period, string DisplayName, string TimeSpent, int Seconds);
 

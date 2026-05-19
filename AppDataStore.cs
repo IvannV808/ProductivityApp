@@ -12,9 +12,17 @@ public static class AppDataStore
 
     private static readonly object SyncLock = new();
 
-    public static string TargetAppsPath { get; } = Path.Combine(AppContext.BaseDirectory, "target_block_apps.db");
+    public static string DataDirectory { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "ProductivityApp");
 
-    public static string ProductivityDataPath { get; } = Path.Combine(AppContext.BaseDirectory, "productivity_metrics.db");
+    public static string TargetAppsPath { get; } = Path.Combine(DataDirectory, "target_block_apps.db");
+
+    public static string ProductivityDataPath { get; } = Path.Combine(DataDirectory, "productivity_metrics.db");
+
+    private static string LegacyTargetAppsPath { get; } = Path.Combine(AppContext.BaseDirectory, "target_block_apps.db");
+
+    private static string LegacyProductivityDataPath { get; } = Path.Combine(AppContext.BaseDirectory, "productivity_metrics.db");
 
     public static IReadOnlyList<TargetApp> GetTargetApps()
     {
@@ -188,6 +196,10 @@ public static class AppDataStore
     {
         lock (SyncLock)
         {
+            Directory.CreateDirectory(DataDirectory);
+            MigrateLegacyDatabase(LegacyTargetAppsPath, TargetAppsPath);
+            MigrateLegacyDatabase(LegacyProductivityDataPath, ProductivityDataPath);
+
             if (!File.Exists(TargetAppsPath))
             {
                 Save(TargetAppsPath, new TargetAppsDatabase());
@@ -198,6 +210,17 @@ public static class AppDataStore
                 Save(ProductivityDataPath, new ProductivityDatabase());
             }
         }
+    }
+
+    private static void MigrateLegacyDatabase(string legacyPath, string newPath)
+    {
+        if (File.Exists(newPath) || !File.Exists(legacyPath))
+        {
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(newPath) ?? DataDirectory);
+        File.Copy(legacyPath, newPath);
     }
 
     private static TargetAppsDatabase LoadTargetAppsDatabase() =>

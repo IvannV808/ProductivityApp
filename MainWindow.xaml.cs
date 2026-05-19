@@ -1,10 +1,24 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using DrawingIcon = System.Drawing.Icon;
+using WinForms = System.Windows.Forms;
+using MediaColor = System.Windows.Media.Color;
+using WpfButton = System.Windows.Controls.Button;
+using WpfBrushes = System.Windows.Media.Brushes;
+using WpfColorConverter = System.Windows.Media.ColorConverter;
+using WpfContextMenu = System.Windows.Controls.ContextMenu;
+using WpfCursors = System.Windows.Input.Cursors;
+using WpfHorizontalAlignment = System.Windows.HorizontalAlignment;
+using WpfMenuItem = System.Windows.Controls.MenuItem;
+using WpfMessageBox = System.Windows.MessageBox;
+using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
+using WpfPoint = System.Windows.Point;
 
 namespace ProductivityApp;
 
@@ -41,14 +55,17 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _usageTimer;
     private readonly ForegroundUsageTracker _usageTracker = new();
     private readonly HashSet<string> _activeCloseAttempts = [];
+    private readonly WinForms.NotifyIcon _trayIcon;
     private List<ScheduledBlock> _scheduledBlocks = [];
     private BlockDragState? _activeDrag;
     private double _slotHeight = DefaultSlotHeight;
+    private bool _isExitRequested;
 
     public MainWindow()
     {
         InitializeComponent();
         SetWindowIcon();
+        _trayIcon = CreateTrayIcon();
         AppDataStore.EnsureDatabasesExist();
 
         RenderSchedule();
@@ -66,7 +83,7 @@ public partial class MainWindow : Window
         };
         _usageTimer.Tick += (_, _) => _usageTracker.Sample();
         _usageTimer.Start();
-        Closing += (_, _) => _usageTracker.FinishCurrentSession();
+        Closing += MainWindow_Closing;
     }
 
     private void SetWindowIcon()
@@ -84,6 +101,73 @@ public partial class MainWindow : Window
         catch
         {
         }
+    }
+
+    private WinForms.NotifyIcon CreateTrayIcon()
+    {
+        WinForms.ContextMenuStrip menu = new();
+        WinForms.ToolStripMenuItem exitItem = new("Exit");
+        exitItem.Click += (_, _) => ExitFromTray();
+        menu.Items.Add(exitItem);
+
+        WinForms.NotifyIcon notifyIcon = new()
+        {
+            Text = "Productivity App",
+            ContextMenuStrip = menu,
+            Visible = true
+        };
+
+        string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        try
+        {
+            notifyIcon.Icon = System.IO.File.Exists(iconPath)
+                ? new DrawingIcon(iconPath)
+                : System.Drawing.SystemIcons.Application;
+        }
+        catch
+        {
+            notifyIcon.Icon = System.Drawing.SystemIcons.Application;
+        }
+
+        notifyIcon.MouseUp += (_, e) =>
+        {
+            if (e.Button == WinForms.MouseButtons.Left)
+            {
+                ShowMainWindowFromTray();
+            }
+        };
+
+        return notifyIcon;
+    }
+
+    private void MainWindow_Closing(object? sender, CancelEventArgs e)
+    {
+        if (_isExitRequested)
+        {
+            _blockTimer.Stop();
+            _usageTimer.Stop();
+            _usageTracker.FinishCurrentSession();
+            _trayIcon.Visible = false;
+            _trayIcon.Dispose();
+            return;
+        }
+
+        e.Cancel = true;
+        Hide();
+    }
+
+    private void ShowMainWindowFromTray()
+    {
+        Show();
+        WindowState = WindowState.Normal;
+        Activate();
+    }
+
+    private void ExitFromTray()
+    {
+        _isExitRequested = true;
+        Close();
+        System.Windows.Application.Current.Shutdown();
     }
 
     private void AppConfigButton_Click(object sender, RoutedEventArgs e)
@@ -136,8 +220,8 @@ public partial class MainWindow : Window
                 Text = DayLabels[dayIndex],
                 FontSize = 17,
                 FontWeight = FontWeights.SemiBold,
-                Foreground = new SolidColorBrush(Color.FromRgb(36, 42, 49)),
-                HorizontalAlignment = HorizontalAlignment.Center,
+                Foreground = new SolidColorBrush(MediaColor.FromRgb(36, 42, 49)),
+                HorizontalAlignment = WpfHorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
             Grid.SetColumn(header, dayIndex);
@@ -150,7 +234,7 @@ public partial class MainWindow : Window
             int minutes = slot * 15;
             for (int dayIndex = 0; dayIndex < ScheduleDays.Length; dayIndex++)
             {
-                Button slotButton = CreateSlotButton(ScheduleDays[dayIndex], minutes);
+                WpfButton slotButton = CreateSlotButton(ScheduleDays[dayIndex], minutes);
                 Grid.SetColumn(slotButton, dayIndex);
                 Grid.SetRow(slotButton, slot + 1);
                 ScheduleGrid.Children.Add(slotButton);
@@ -160,7 +244,7 @@ public partial class MainWindow : Window
             {
                 Text = minutes % 60 == 0 ? TimeHelpers.FormatMinutes(minutes) : string.Empty,
                 FontSize = 11,
-                Foreground = new SolidColorBrush(Color.FromRgb(101, 112, 128)),
+                Foreground = new SolidColorBrush(MediaColor.FromRgb(101, 112, 128)),
                 VerticalAlignment = VerticalAlignment.Top,
                 Margin = new Thickness(8, 1, 0, 0)
             };
@@ -174,16 +258,16 @@ public partial class MainWindow : Window
         StatusText.Text = $"{_scheduledBlocks.Count} scheduled blocks active";
     }
 
-    private static Button CreateSlotButton(DayOfWeek day, int startMinutes)
+    private static WpfButton CreateSlotButton(DayOfWeek day, int startMinutes)
     {
-        Button button = new()
+        WpfButton button = new()
         {
-            Background = Brushes.Transparent,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(223, 228, 236)),
+            Background = WpfBrushes.Transparent,
+            BorderBrush = new SolidColorBrush(MediaColor.FromRgb(223, 228, 236)),
             BorderThickness = new Thickness(0.5),
             Padding = new Thickness(0),
             Tag = new ScheduleSlot(day, startMinutes),
-            Cursor = Cursors.Hand
+            Cursor = WpfCursors.Hand
         };
         button.Click += SlotButton_Click;
         return button;
@@ -191,7 +275,7 @@ public partial class MainWindow : Window
 
     private static void SlotButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: ScheduleSlot slot } button &&
+        if (sender is WpfButton { Tag: ScheduleSlot slot } button &&
             Window.GetWindow(button) is MainWindow mainWindow)
         {
             mainWindow.OpenScheduleBlockWindow(slot.Day, slot.StartMinutes);
@@ -270,30 +354,30 @@ public partial class MainWindow : Window
 
     private Border CreateBlockPanel(ScheduledBlock block, BlockLayout layout)
     {
-        Color color = (Color)ColorConverter.ConvertFromString(block.ColorHex);
+        MediaColor color = (MediaColor)WpfColorConverter.ConvertFromString(block.ColorHex);
         Border blockPanel = new()
         {
-            Background = new SolidColorBrush(Color.FromArgb(224, color.R, color.G, color.B)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(83, 91, 105)),
+            Background = new SolidColorBrush(MediaColor.FromArgb(224, color.R, color.G, color.B)),
+            BorderBrush = new SolidColorBrush(MediaColor.FromRgb(83, 91, 105)),
             BorderThickness = new Thickness(1),
             Padding = new Thickness(6, 3, 6, 3),
             CornerRadius = new CornerRadius(4),
-            Cursor = Cursors.SizeAll,
+            Cursor = WpfCursors.SizeAll,
             Tag = new BlockElementState(block, layout),
             Child = CreateBlockText(block)
         };
 
-        MenuItem editItem = new()
+        WpfMenuItem editItem = new()
         {
             Header = "Edit"
         };
         editItem.Click += (_, _) => OpenEditScheduleBlockWindow(block);
-        MenuItem deleteItem = new()
+        WpfMenuItem deleteItem = new()
         {
             Header = "Delete"
         };
         deleteItem.Click += (_, _) => DeleteScheduleBlock(block);
-        blockPanel.ContextMenu = new ContextMenu
+        blockPanel.ContextMenu = new WpfContextMenu
         {
             Items = { editItem, deleteItem }
         };
@@ -306,7 +390,7 @@ public partial class MainWindow : Window
 
     private void DeleteScheduleBlock(ScheduledBlock block)
     {
-        MessageBoxResult result = MessageBox.Show(
+        MessageBoxResult result = WpfMessageBox.Show(
             this,
             $"Delete the {block.TimeRangeText} block on {block.Day}?",
             "Delete Schedule Block",
@@ -329,7 +413,7 @@ public partial class MainWindow : Window
             Text = $"{block.TimeRangeText}\n{string.Join(", ", block.TargetProcessNames)}",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromRgb(24, 29, 36))
+            Foreground = new SolidColorBrush(MediaColor.FromRgb(24, 29, 36))
         };
     }
 
@@ -370,7 +454,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        Point positionInBlock = e.GetPosition(blockPanel);
+        WpfPoint positionInBlock = e.GetPosition(blockPanel);
         BlockDragMode mode = GetDragMode(positionInBlock, blockPanel.ActualHeight);
         ScheduledBlock block = state.Block;
 
@@ -388,7 +472,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void BlockPanel_MouseMove(object sender, MouseEventArgs e)
+    private void BlockPanel_MouseMove(object sender, WpfMouseEventArgs e)
     {
         if (sender is not Border blockPanel ||
             blockPanel.Tag is not BlockElementState state)
@@ -398,14 +482,14 @@ public partial class MainWindow : Window
 
         if (_activeDrag is null || !ReferenceEquals(_activeDrag.Element, blockPanel) || e.LeftButton != MouseButtonState.Pressed)
         {
-            Point hoverPoint = e.GetPosition(blockPanel);
+            WpfPoint hoverPoint = e.GetPosition(blockPanel);
             blockPanel.Cursor = GetDragMode(hoverPoint, blockPanel.ActualHeight) == BlockDragMode.Move
-                ? Cursors.SizeAll
-                : Cursors.SizeNS;
+                ? WpfCursors.SizeAll
+                : WpfCursors.SizeNS;
             return;
         }
 
-        Point currentPoint = e.GetPosition(BlockCanvas);
+        WpfPoint currentPoint = e.GetPosition(BlockCanvas);
         int slotDelta = (int)Math.Round((currentPoint.Y - _activeDrag.StartPointer.Y) / _slotHeight);
         int minuteDelta = slotDelta * 15;
         ScheduledBlock block = _activeDrag.Block;
@@ -455,7 +539,7 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private static BlockDragMode GetDragMode(Point point, double blockHeight)
+    private static BlockDragMode GetDragMode(WpfPoint point, double blockHeight)
     {
         if (point.Y <= ResizeEdgeSize)
         {
@@ -693,7 +777,7 @@ public partial class MainWindow : Window
     private void ShowClosureMessage()
     {
         string message = ClosureMessages[Random.Shared.Next(ClosureMessages.Length)];
-        MessageBox.Show(this, message, "Back to Work", MessageBoxButton.OK, MessageBoxImage.Information);
+        WpfMessageBox.Show(this, message, "Back to Work", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 }
 
@@ -708,7 +792,7 @@ public sealed record BlockDragState(
     Border Element,
     BlockLayout Layout,
     BlockDragMode Mode,
-    Point StartPointer,
+    WpfPoint StartPointer,
     DayOfWeek OriginalDay,
     int OriginalStartMinutes,
     int OriginalEndMinutes);

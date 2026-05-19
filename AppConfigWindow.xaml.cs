@@ -1,11 +1,15 @@
 using System.Windows;
 using System.Windows.Input;
+using WpfDragEventArgs = System.Windows.DragEventArgs;
+using WpfDragDropEffects = System.Windows.DragDropEffects;
+using WpfMouseEventArgs = System.Windows.Input.MouseEventArgs;
+using WpfPoint = System.Windows.Point;
 
 namespace ProductivityApp;
 
 public partial class AppConfigWindow : Window
 {
-    private Point _dragStartPoint;
+    private WpfPoint _dragStartPoint;
 
     public AppConfigWindow()
     {
@@ -41,7 +45,7 @@ public partial class AppConfigWindow : Window
         BlockedAppsList.ItemsSource = AppDataStore.GetTargetApps();
     }
 
-    private void RunningAppsList_PreviewMouseMove(object sender, MouseEventArgs e)
+    private void RunningAppsList_PreviewMouseMove(object sender, WpfMouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed)
         {
@@ -49,7 +53,7 @@ public partial class AppConfigWindow : Window
             return;
         }
 
-        Point currentPosition = e.GetPosition(null);
+        WpfPoint currentPosition = e.GetPosition(null);
         if (Math.Abs(currentPosition.X - _dragStartPoint.X) < SystemParameters.MinimumHorizontalDragDistance &&
             Math.Abs(currentPosition.Y - _dragStartPoint.Y) < SystemParameters.MinimumVerticalDragDistance)
         {
@@ -62,19 +66,19 @@ public partial class AppConfigWindow : Window
 
         if (selectedApps.Count > 0)
         {
-            DragDrop.DoDragDrop(RunningAppsList, selectedApps, DragDropEffects.Copy);
+            DragDrop.DoDragDrop(RunningAppsList, selectedApps, WpfDragDropEffects.Copy);
         }
     }
 
-    private void BlockedAppsPanel_DragOver(object sender, DragEventArgs e)
+    private void BlockedAppsPanel_DragOver(object sender, WpfDragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(typeof(List<RunningAppInfo>))
-            ? DragDropEffects.Copy
-            : DragDropEffects.None;
+            ? WpfDragDropEffects.Copy
+            : WpfDragDropEffects.None;
         e.Handled = true;
     }
 
-    private void BlockedAppsPanel_Drop(object sender, DragEventArgs e)
+    private void BlockedAppsPanel_Drop(object sender, WpfDragEventArgs e)
     {
         if (e.Data.GetData(typeof(List<RunningAppInfo>)) is not List<RunningAppInfo> apps)
         {
