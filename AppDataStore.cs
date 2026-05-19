@@ -37,7 +37,9 @@ public static class AppDataStore
 
             foreach (TargetApp app in apps)
             {
-                if (string.IsNullOrWhiteSpace(app.ProcessName) || !existing.Add(app.ProcessName))
+                if (string.IsNullOrWhiteSpace(app.ProcessName) ||
+                    !AppBlockRules.IsAllowedBlockingCandidate(app) ||
+                    !existing.Add(app.ProcessName))
                 {
                     continue;
                 }
@@ -138,6 +140,16 @@ public static class AppDataStore
             return LoadProductivityDatabase().UsageSessions
                 .OrderByDescending(entry => entry.StartAt)
                 .ToList();
+        }
+    }
+
+    public static void ClearUsageSessions()
+    {
+        lock (SyncLock)
+        {
+            ProductivityDatabase database = LoadProductivityDatabase();
+            database.UsageSessions.Clear();
+            Save(ProductivityDataPath, database);
         }
     }
 

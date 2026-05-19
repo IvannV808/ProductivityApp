@@ -32,6 +32,7 @@ public sealed class RunningAppInfo
             .Where(app => !string.Equals(app.ProcessName, appAssemblyName, StringComparison.OrdinalIgnoreCase))
             .Where(app => !string.Equals(app.DisplayName, "Productivity App", StringComparison.OrdinalIgnoreCase))
             .Where(app => !string.Equals(app.DisplayName, "ProductivityApp", StringComparison.OrdinalIgnoreCase))
+            .Where(AppBlockRules.IsAllowedBlockingCandidate)
             .GroupBy(app => app.ProcessName, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.OrderBy(app => app.DisplayName).First())
             .OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase)
@@ -128,6 +129,32 @@ public static class RunningAppNameResolver
         return cleaned.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
             ? cleaned[..^4]
             : cleaned;
+    }
+}
+
+public static class AppBlockRules
+{
+    private static readonly string[] BlockedDisplayNames =
+    [
+        "Microsoft Windows Operating System",
+        "Windows Operating System"
+    ];
+
+    public static bool IsAllowedBlockingCandidate(RunningAppInfo app) =>
+        IsAllowedBlockingCandidate(app.ProcessName, app.DisplayName);
+
+    public static bool IsAllowedBlockingCandidate(TargetApp app) =>
+        IsAllowedBlockingCandidate(app.ProcessName, app.DisplayName);
+
+    public static bool IsAllowedBlockingCandidate(string processName, string displayName)
+    {
+        if (string.IsNullOrWhiteSpace(processName) || string.IsNullOrWhiteSpace(displayName))
+        {
+            return false;
+        }
+
+        return !BlockedDisplayNames.Any(blocked =>
+            string.Equals(displayName, blocked, StringComparison.OrdinalIgnoreCase));
     }
 }
 

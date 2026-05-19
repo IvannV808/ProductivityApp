@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Threading;
 
 namespace ProductivityApp;
 
@@ -20,6 +21,7 @@ public partial class MetricsWindow : Window
     ];
 
     private readonly List<SelectableMetricApp> _metricApps = [];
+    private readonly DispatcherTimer _refreshTimer;
     private List<UsageChartSeries> _chartSeries = [];
     private List<UsageBucket> _chartBuckets = [];
 
@@ -29,6 +31,14 @@ public partial class MetricsWindow : Window
         ToDatePicker.SelectedDate = DateTime.Today;
         FromDatePicker.SelectedDate = DateTime.Today.AddDays(-6);
         RenderMetrics();
+
+        _refreshTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(5)
+        };
+        _refreshTimer.Tick += (_, _) => RenderMetrics();
+        _refreshTimer.Start();
+        Closed += (_, _) => _refreshTimer.Stop();
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -71,13 +81,22 @@ public partial class MetricsWindow : Window
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         IReadOnlyList<AppUsageSession> sessions = AppDataStore.GetUsageSessions();
+        IReadOnlyList<TargetApp> targetApps = AppDataStore.GetTargetApps();
+
         _metricApps.Clear();
-        _metricApps.AddRange(sessions
-            .GroupBy(session => session.ProcessName, StringComparer.OrdinalIgnoreCase)
-            .Select(group => new SelectableMetricApp(
-                group.Key,
-                group.OrderByDescending(session => session.EndAt).First().DisplayName,
-                selectedApps.Count == 0 || selectedApps.Contains(group.Key)))
+        _metricApps.AddRange(targetApps
+            .Select(targetApp =>
+            {
+                AppUsageSession? recentSession = sessions
+                    .Where(session => string.Equals(session.ProcessName, targetApp.ProcessName, StringComparison.OrdinalIgnoreCase))
+                    .OrderByDescending(session => session.EndAt)
+                    .FirstOrDefault();
+
+                return new SelectableMetricApp(
+                    targetApp.ProcessName,
+                    recentSession?.DisplayName ?? targetApp.DisplayName,
+                    selectedApps.Count == 0 || selectedApps.Contains(targetApp.ProcessName));
+            })
             .OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase));
 
         AppsList.ItemsSource = null;

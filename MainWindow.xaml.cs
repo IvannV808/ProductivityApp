@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 
 namespace ProductivityApp;
@@ -28,6 +29,14 @@ public partial class MainWindow : Window
 
     private static readonly string[] DayLabels = ["Mon", "Tue", "Wed", "Thur", "Fri", "Sat", "Sun"];
 
+    private static readonly string[] ClosureMessages =
+    [
+        "Please use your time more wisely, your future family is relying on you.",
+        "No time to be dinking off! GET WORKING!",
+        "Only soft people play when its time to work and you're not soft!",
+        "Big gains for small work. Lets goo!"
+    ];
+
     private readonly DispatcherTimer _blockTimer;
     private readonly DispatcherTimer _usageTimer;
     private readonly ForegroundUsageTracker _usageTracker = new();
@@ -39,6 +48,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        SetWindowIcon();
         AppDataStore.EnsureDatabasesExist();
 
         RenderSchedule();
@@ -57,6 +67,23 @@ public partial class MainWindow : Window
         _usageTimer.Tick += (_, _) => _usageTracker.Sample();
         _usageTimer.Start();
         Closing += (_, _) => _usageTracker.FinishCurrentSession();
+    }
+
+    private void SetWindowIcon()
+    {
+        string iconPath = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "AppIcon.ico");
+        if (!System.IO.File.Exists(iconPath))
+        {
+            return;
+        }
+
+        try
+        {
+            Icon = BitmapFrame.Create(new Uri(iconPath, UriKind.Absolute));
+        }
+        catch
+        {
+        }
     }
 
     private void AppConfigButton_Click(object sender, RoutedEventArgs e)
@@ -648,6 +675,8 @@ public partial class MainWindow : Window
                     DetectedAt = detectedAt,
                     ClosedAt = DateTime.Now
                 });
+
+                ShowClosureMessage();
             }
             catch
             {
@@ -659,6 +688,12 @@ public partial class MainWindow : Window
                 _activeCloseAttempts.Remove(closeKey);
             }
         }
+    }
+
+    private void ShowClosureMessage()
+    {
+        string message = ClosureMessages[Random.Shared.Next(ClosureMessages.Length)];
+        MessageBox.Show(this, message, "Back to Work", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 }
 

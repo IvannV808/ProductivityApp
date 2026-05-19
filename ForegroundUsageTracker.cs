@@ -26,6 +26,15 @@ public sealed class ForegroundUsageTracker
             return;
         }
 
+        TargetApp? trackedTarget = AppDataStore.GetTargetApps()
+            .FirstOrDefault(app => string.Equals(app.ProcessName, foregroundApp.ProcessName, StringComparison.OrdinalIgnoreCase));
+
+        if (trackedTarget is null)
+        {
+            FinishCurrentSession(now);
+            return;
+        }
+
         DateOnly today = DateOnly.FromDateTime(now);
         if (_currentSession is null ||
             _currentSession.Date != today ||
@@ -35,7 +44,7 @@ public sealed class ForegroundUsageTracker
             _currentSession = new AppUsageSession
             {
                 ProcessName = foregroundApp.ProcessName,
-                DisplayName = foregroundApp.DisplayName,
+                DisplayName = trackedTarget.DisplayName,
                 Date = today,
                 StartAt = now,
                 EndAt = now
