@@ -41,10 +41,14 @@
         <Border Grid.Column="2" Background="#FFFFFF" BorderBrush="#DDE2EA" BorderThickness="1" Padding="14"
                 AllowDrop="True" Drop="BlockedAppsPanel_Drop" DragOver="BlockedAppsPanel_DragOver">
             <DockPanel>
-                <TextBlock DockPanel.Dock="Top" Text="Targeted for Blocking" Style="{StaticResource SectionTitleStyle}"/>
+                <StackPanel DockPanel.Dock="Top">
+                    <TextBlock Text="Targeted for Blocking" Style="{StaticResource SectionTitleStyle}"/>
+                    <Button Content="Remove Selected" Width="126" Height="32" HorizontalAlignment="Left" Margin="0,0,0,10"
+                            Click="RemoveSelectedButton_Click"/>
+                </StackPanel>
                 <TextBlock DockPanel.Dock="Bottom" x:Name="DatabasePathText" Foreground="#657080" FontSize="12"
                            TextWrapping="Wrap" Margin="0,10,0,0"/>
-                <ListBox x:Name="BlockedAppsList" DisplayMemberPath="DisplayName"/>
+                <ListBox x:Name="BlockedAppsList" DisplayMemberPath="DisplayName" SelectionMode="Extended"/>
             </DockPanel>
         </Border>
     </Grid>

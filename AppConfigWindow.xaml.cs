@@ -30,6 +30,17 @@ public partial class AppConfigWindow : Window
         AddSelectedRunningApps();
     }
 
+    private void RemoveSelectedButton_Click(object sender, RoutedEventArgs e)
+    {
+        List<string> selectedProcessNames = BlockedAppsList.SelectedItems
+            .Cast<TargetApp>()
+            .Select(app => app.ProcessName)
+            .ToList();
+
+        AppDataStore.RemoveTargetApps(selectedProcessNames);
+        BlockedAppsList.ItemsSource = AppDataStore.GetTargetApps();
+    }
+
     private void RunningAppsList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed)
@@ -84,7 +95,7 @@ public partial class AppConfigWindow : Window
             .Select(app => new TargetApp
             {
                 ProcessName = app.ProcessName,
-                DisplayName = app.DisplayText
+                DisplayName = app.DisplayName
             })
             .ToList();
 

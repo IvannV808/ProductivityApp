@@ -39,9 +39,14 @@
             </Grid.RowDefinitions>
 
             <DockPanel Margin="0,0,0,14">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <TextBlock Text="Zoom" VerticalAlignment="Center" Foreground="#657080" Margin="0,0,8,0"/>
+                    <Slider x:Name="ZoomSlider" Width="150" Minimum="16" Maximum="52" Value="26"
+                            TickFrequency="2" IsSnapToTickEnabled="True" ValueChanged="ZoomSlider_ValueChanged"/>
+                    <TextBlock x:Name="StatusText" VerticalAlignment="Center" Foreground="#657080" FontSize="13"
+                               Margin="16,0,0,0"/>
+                </StackPanel>
                 <TextBlock Text="Weekly Schedule" FontSize="28" FontWeight="SemiBold" Foreground="#242A31"/>
-                <TextBlock x:Name="StatusText" DockPanel.Dock="Right" HorizontalAlignment="Right"
-                           VerticalAlignment="Center" Foreground="#657080" FontSize="13"/>
             </DockPanel>
 
             <Border Grid.Row="1" Background="#FFFFFF" BorderBrush="#DDE2EA" BorderThickness="1">

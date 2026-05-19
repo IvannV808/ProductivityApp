@@ -54,6 +54,25 @@ public static class AppDataStore
         }
     }
 
+    public static void RemoveTargetApps(IEnumerable<string> processNames)
+    {
+        lock (SyncLock)
+        {
+            HashSet<string> processNameSet = processNames
+                .Where(processName => !string.IsNullOrWhiteSpace(processName))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (processNameSet.Count == 0)
+            {
+                return;
+            }
+
+            TargetAppsDatabase database = LoadTargetAppsDatabase();
+            database.Apps.RemoveAll(app => processNameSet.Contains(app.ProcessName));
+            Save(TargetAppsPath, database);
+        }
+    }
+
     public static IReadOnlyList<ScheduledBlock> GetScheduledBlocks()
     {
         lock (SyncLock)
@@ -91,6 +110,17 @@ public static class AppDataStore
         }
     }
 
+    public static void DeleteScheduledBlock(string blockId)
+    {
+        lock (SyncLock)
+        {
+            ProductivityDatabase database = LoadProductivityDatabase();
+            database.ScheduledBlocks.RemoveAll(block =>
+                string.Equals(block.Id, blockId, StringComparison.OrdinalIgnoreCase));
+            Save(ProductivityDataPath, database);
+        }
+    }
+
     public static IReadOnlyList<AppClosureEvent> GetClosureEvents()
     {
         lock (SyncLock)
@@ -98,6 +128,37 @@ public static class AppDataStore
             return LoadProductivityDatabase().ClosureEvents
                 .OrderByDescending(entry => entry.ClosedAt)
                 .ToList();
+        }
+    }
+
+    public static IReadOnlyList<AppUsageSession> GetUsageSessions()
+    {
+        lock (SyncLock)
+        {
+            return LoadProductivityDatabase().UsageSessions
+                .OrderByDescending(entry => entry.StartAt)
+                .ToList();
+        }
+    }
+
+    public static void UpsertUsageSession(AppUsageSession session)
+    {
+        lock (SyncLock)
+        {
+            ProductivityDatabase database = LoadProductivityDatabase();
+            int index = database.UsageSessions.FindIndex(existing =>
+                string.Equals(existing.Id, session.Id, StringComparison.OrdinalIgnoreCase));
+
+            if (index >= 0)
+            {
+                database.UsageSessions[index] = session;
+            }
+            else
+            {
+                database.UsageSessions.Add(session);
+            }
+
+            Save(ProductivityDataPath, database);
         }
     }
 

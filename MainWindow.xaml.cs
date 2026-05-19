@@ -10,7 +10,7 @@ namespace ProductivityApp;
 public partial class MainWindow : Window
 {
     private const double HeaderHeight = 42;
-    private const double SlotHeight = 26;
+    private const double DefaultSlotHeight = 26;
     private const double TimeColumnWidth = 76;
     private const double BlockWidthRatio = 0.78;
     private const double ResizeEdgeSize = 7;
@@ -28,30 +28,19 @@ public partial class MainWindow : Window
 
     private static readonly string[] DayLabels = ["Mon", "Tue", "Wed", "Thur", "Fri", "Sat", "Sun"];
 
-    private static readonly string[] BlockColors =
-    [
-        "#8EC5FF",
-        "#A7D8A0",
-        "#F6C177",
-        "#D9B8FF",
-        "#FFAAA5",
-        "#85DCCF",
-        "#F5E27A",
-        "#B4C6FF"
-    ];
-
     private readonly DispatcherTimer _blockTimer;
+    private readonly DispatcherTimer _usageTimer;
+    private readonly ForegroundUsageTracker _usageTracker = new();
     private readonly HashSet<string> _activeCloseAttempts = [];
     private List<ScheduledBlock> _scheduledBlocks = [];
     private BlockDragState? _activeDrag;
-    private int _nextColorIndex;
+    private double _slotHeight = DefaultSlotHeight;
 
     public MainWindow()
     {
         InitializeComponent();
         AppDataStore.EnsureDatabasesExist();
 
-        _nextColorIndex = AppDataStore.GetScheduledBlocks().Count % BlockColors.Length;
         RenderSchedule();
 
         _blockTimer = new DispatcherTimer
@@ -60,6 +49,14 @@ public partial class MainWindow : Window
         };
         _blockTimer.Tick += BlockTimer_Tick;
         _blockTimer.Start();
+
+        _usageTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(5)
+        };
+        _usageTimer.Tick += (_, _) => _usageTracker.Sample();
+        _usageTimer.Start();
+        Closing += (_, _) => _usageTracker.FinishCurrentSession();
     }
 
     private void AppConfigButton_Click(object sender, RoutedEventArgs e)
@@ -99,10 +96,10 @@ public partial class MainWindow : Window
 
         for (int slot = 0; slot < 96; slot++)
         {
-            ScheduleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(SlotHeight) });
+            ScheduleGrid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(_slotHeight) });
         }
 
-        ScheduleHost.Height = HeaderHeight + (96 * SlotHeight);
+        ScheduleHost.Height = HeaderHeight + (96 * _slotHeight);
         BlockCanvas.Height = ScheduleHost.Height;
 
         for (int dayIndex = 0; dayIndex < DayLabels.Length; dayIndex++)
@@ -176,7 +173,7 @@ public partial class MainWindow : Window
 
     private void OpenScheduleBlockWindow(DayOfWeek day, int startMinutes)
     {
-        ScheduleBlockWindow window = new(day, startMinutes, BlockColors[_nextColorIndex])
+        ScheduleBlockWindow window = new(day, startMinutes, BlockColorOption.All[0].Hex)
         {
             Owner = this
         };
@@ -187,7 +184,6 @@ public partial class MainWindow : Window
         }
 
         AppDataStore.AddScheduledBlock(window.ScheduledBlock);
-        _nextColorIndex = (_nextColorIndex + 1) % BlockColors.Length;
         RenderSchedule();
     }
 
@@ -210,6 +206,15 @@ public partial class MainWindow : Window
     private void ScheduleGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         RenderBlockOverlays();
+    }
+
+    private void ZoomSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        _slotHeight = e.NewValue <= 0 ? DefaultSlotHeight : e.NewValue;
+        if (ScheduleGrid is not null)
+        {
+            RenderSchedule();
+        }
     }
 
     private void RenderBlockOverlays()
@@ -256,15 +261,38 @@ public partial class MainWindow : Window
             Header = "Edit"
         };
         editItem.Click += (_, _) => OpenEditScheduleBlockWindow(block);
+        MenuItem deleteItem = new()
+        {
+            Header = "Delete"
+        };
+        deleteItem.Click += (_, _) => DeleteScheduleBlock(block);
         blockPanel.ContextMenu = new ContextMenu
         {
-            Items = { editItem }
+            Items = { editItem, deleteItem }
         };
 
         blockPanel.MouseMove += BlockPanel_MouseMove;
         blockPanel.MouseLeftButtonDown += BlockPanel_MouseLeftButtonDown;
         blockPanel.MouseLeftButtonUp += BlockPanel_MouseLeftButtonUp;
         return blockPanel;
+    }
+
+    private void DeleteScheduleBlock(ScheduledBlock block)
+    {
+        MessageBoxResult result = MessageBox.Show(
+            this,
+            $"Delete the {block.TimeRangeText} block on {block.Day}?",
+            "Delete Schedule Block",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (result != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        AppDataStore.DeleteScheduledBlock(block.Id);
+        RenderSchedule();
     }
 
     private static TextBlock CreateBlockText(ScheduledBlock block)
@@ -291,8 +319,8 @@ public partial class MainWindow : Window
         double laneAreaWidth = Math.Max(48, columnWidth * BlockWidthRatio);
         double laneWidth = Math.Max(36, laneAreaWidth / Math.Max(1, layout.LaneCount));
         double left = columnLeft + (layout.Lane * laneWidth) + 3;
-        double top = HeaderHeight + ((block.StartMinutes / 15.0) * SlotHeight) + 2;
-        double height = Math.Max(SlotHeight - 4, ((block.EndMinutes - block.StartMinutes) / 15.0 * SlotHeight) - 4);
+        double top = HeaderHeight + ((block.StartMinutes / 15.0) * _slotHeight) + 2;
+        double height = Math.Max(_slotHeight - 4, ((block.EndMinutes - block.StartMinutes) / 15.0 * _slotHeight) - 4);
         double width = Math.Max(32, laneWidth - 6);
 
         Canvas.SetLeft(blockPanel, left);
@@ -351,7 +379,7 @@ public partial class MainWindow : Window
         }
 
         Point currentPoint = e.GetPosition(BlockCanvas);
-        int slotDelta = (int)Math.Round((currentPoint.Y - _activeDrag.StartPointer.Y) / SlotHeight);
+        int slotDelta = (int)Math.Round((currentPoint.Y - _activeDrag.StartPointer.Y) / _slotHeight);
         int minuteDelta = slotDelta * 15;
         ScheduledBlock block = _activeDrag.Block;
 

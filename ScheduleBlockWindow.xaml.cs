@@ -62,6 +62,13 @@ public partial class ScheduleBlockWindow : Window
         EndTimeCombo.SelectedValuePath = nameof(TimeOption.Minutes);
         StartTimeCombo.SelectedValue = Math.Clamp(selectedStartMinutes, 0, 23 * 60 + 45);
         EndTimeCombo.SelectedValue = Math.Clamp(selectedEndMinutes, 15, 24 * 60);
+
+        ColorCombo.ItemsSource = BlockColorOption.All;
+        ColorCombo.DisplayMemberPath = nameof(BlockColorOption.DisplayText);
+        ColorCombo.SelectedValuePath = nameof(BlockColorOption.Hex);
+        ColorCombo.SelectedValue = BlockColorOption.All.Any(option => option.Hex == _colorHex)
+            ? _colorHex
+            : BlockColorOption.All[0].Hex;
     }
 
     private void SaveButton_Click(object sender, RoutedEventArgs e)
@@ -100,7 +107,7 @@ public partial class ScheduleBlockWindow : Window
             StartMinutes = startMinutes,
             EndMinutes = endMinutes,
             TargetProcessNames = selectedProcesses,
-            ColorHex = _colorHex,
+            ColorHex = ColorCombo.SelectedValue as string ?? BlockColorOption.All[0].Hex,
             CreatedAt = _createdAt ?? DateTime.Now
         };
 
