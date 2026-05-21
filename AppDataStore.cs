@@ -29,6 +29,7 @@ public static class AppDataStore
         lock (SyncLock)
         {
             return LoadTargetAppsDatabase().Apps
+                .Where(AppBlockRules.IsAllowedBlockingCandidate)
                 .OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -204,11 +205,25 @@ public static class AppDataStore
             {
                 Save(TargetAppsPath, new TargetAppsDatabase());
             }
+            else
+            {
+                RemoveDisallowedTargetApps();
+            }
 
             if (!File.Exists(ProductivityDataPath))
             {
                 Save(ProductivityDataPath, new ProductivityDatabase());
             }
+        }
+    }
+
+    private static void RemoveDisallowedTargetApps()
+    {
+        TargetAppsDatabase database = LoadTargetAppsDatabase();
+        int removedCount = database.Apps.RemoveAll(app => !AppBlockRules.IsAllowedBlockingCandidate(app));
+        if (removedCount > 0)
+        {
+            Save(TargetAppsPath, database);
         }
     }
 

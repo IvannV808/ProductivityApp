@@ -1,4 +1,7 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace ProductivityApp;
 
@@ -22,9 +25,11 @@ public sealed class RunningAppInfo
         using Process currentProcess = Process.GetCurrentProcess();
         string currentProcessName = currentProcess.ProcessName;
         string appAssemblyName = typeof(RunningAppInfo).Assembly.GetName().Name ?? "ProductivityApp";
+        HashSet<int> visibleWindowProcessIds = VisibleWindowProcessFinder.GetVisibleWindowProcessIds();
 
         return Process.GetProcesses()
             .Where(process => process.Id != currentProcessId)
+            .Where(process => visibleWindowProcessIds.Contains(process.Id))
             .Select(TryCreate)
             .Where(app => app is not null)
             .Cast<RunningAppInfo>()
@@ -44,9 +49,8 @@ public sealed class RunningAppInfo
         try
         {
             string processName = process.ProcessName;
-            string title = process.MainWindowTitle;
 
-            if (string.IsNullOrWhiteSpace(processName) || string.IsNullOrWhiteSpace(title))
+            if (string.IsNullOrWhiteSpace(processName))
             {
                 return null;
             }
@@ -86,7 +90,11 @@ public static class RunningAppNameResolver
         ["WinStore.App"] = "Microsoft Store",
         ["TextInputHost"] = "Windows Input Experience",
         ["steamwebhelper"] = "Steam",
-        ["PhoneExperienceHost"] = "Phone Link"
+        ["PhoneExperienceHost"] = "Phone Link",
+        ["Expedition33"] = "Expedition 33",
+        ["Expedition33-Win64-Shipping"] = "Expedition 33",
+        ["Sandfall-Win64-Shipping"] = "Expedition 33",
+        ["ClairObscurExpedition33"] = "Expedition 33"
     };
 
     public static string GetFriendlyDisplayName(Process process, string processName)
@@ -153,9 +161,67 @@ public static class AppBlockRules
             return false;
         }
 
+        string normalizedDisplayName = NormalizeDisplayName(displayName);
         return !BlockedDisplayNames.Any(blocked =>
-            string.Equals(displayName, blocked, StringComparison.OrdinalIgnoreCase));
+            string.Equals(normalizedDisplayName, NormalizeDisplayName(blocked), StringComparison.OrdinalIgnoreCase));
     }
+
+    private static string NormalizeDisplayName(string displayName)
+    {
+        string withoutMarks = displayName
+            .Replace("®", string.Empty, StringComparison.Ordinal)
+            .Replace("™", string.Empty, StringComparison.Ordinal)
+            .Replace("©", string.Empty, StringComparison.Ordinal);
+
+        return Regex.Replace(withoutMarks, @"\s+", " ").Trim();
+    }
+}
+
+public static class VisibleWindowProcessFinder
+{
+    public static HashSet<int> GetVisibleWindowProcessIds()
+    {
+        HashSet<int> processIds = [];
+
+        EnumWindows((windowHandle, lParam) =>
+        {
+            if (!IsWindowVisible(windowHandle) || GetWindow(windowHandle, GetWindowCommand.Owner) != IntPtr.Zero)
+            {
+                return true;
+            }
+
+            uint _ = GetWindowThreadProcessId(windowHandle, out uint processId);
+            if (processId > 0)
+            {
+                processIds.Add((int)processId);
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return processIds;
+    }
+
+    private delegate bool EnumWindowsProc(IntPtr windowHandle, IntPtr lParam);
+
+    private const uint GetWindowCommandOwner = 4;
+
+    private enum GetWindowCommand : uint
+    {
+        Owner = GetWindowCommandOwner
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool EnumWindows(EnumWindowsProc enumProc, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowVisible(IntPtr windowHandle);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetWindow(IntPtr windowHandle, GetWindowCommand command);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
 }
 
 public sealed class ScheduledBlock

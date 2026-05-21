@@ -62,7 +62,9 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, DateTime> _blockUnlockExpirations = [];
     private List<ScheduledBlock> _scheduledBlocks = [];
     private BlockDragState? _activeDrag;
+    private MetricsWindow? _metricsWindow;
     private double _slotHeight = DefaultSlotHeight;
+    private DateTime _nextMotivationMessageAt = DateTime.MinValue;
     private bool _isExitRequested;
 
     public MainWindow()
@@ -117,8 +119,12 @@ public partial class MainWindow : Window
     private WinForms.NotifyIcon CreateTrayIcon()
     {
         WinForms.ContextMenuStrip menu = new();
+        WinForms.ToolStripMenuItem metricsItem = new("Metrics");
+        metricsItem.Click += (_, _) => Dispatcher.Invoke(ShowMetricsWindow);
         WinForms.ToolStripMenuItem exitItem = new("Exit");
         exitItem.Click += (_, _) => ExitFromTray();
+        menu.Items.Add(metricsItem);
+        menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add(exitItem);
 
         WinForms.NotifyIcon notifyIcon = new()
@@ -193,11 +199,28 @@ public partial class MainWindow : Window
 
     private void MetricsButton_Click(object sender, RoutedEventArgs e)
     {
-        MetricsWindow window = new()
+        ShowMetricsWindow();
+    }
+
+    private void ShowMetricsWindow()
+    {
+        if (_metricsWindow is null)
         {
-            Owner = this
-        };
-        window.ShowDialog();
+            _metricsWindow = new MetricsWindow();
+            _metricsWindow.Closed += (_, _) => _metricsWindow = null;
+        }
+
+        if (!_metricsWindow.IsVisible)
+        {
+            _metricsWindow.Show();
+        }
+
+        if (_metricsWindow.WindowState == WindowState.Minimized)
+        {
+            _metricsWindow.WindowState = WindowState.Normal;
+        }
+
+        _metricsWindow.Activate();
     }
 
     private void RenderSchedule()
@@ -941,8 +964,16 @@ public partial class MainWindow : Window
 
     private void ShowClosureMessage()
     {
+        DateTime now = DateTime.Now;
+        if (now < _nextMotivationMessageAt)
+        {
+            return;
+        }
+
+        _nextMotivationMessageAt = now.AddSeconds(7);
         string message = ClosureMessages[Random.Shared.Next(ClosureMessages.Length)];
-        WpfMessageBox.Show(this, message, "Back to Work", MessageBoxButton.OK, MessageBoxImage.Information);
+        MotivationWindow window = new(message);
+        window.Show();
     }
 }
 
