@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.ComponentModel;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -26,7 +27,8 @@ public partial class MainWindow : Window
 {
     private const double HeaderHeight = 42;
     private const double DefaultSlotHeight = 26;
-    private const double TimeColumnWidth = 76;
+    private const double TimeColumnWidth = 70;
+    private const double DayColumnMinWidth = 105;
     private const double BlockWidthRatio = 0.78;
     private const double ResizeEdgeSize = 7;
 
@@ -53,9 +55,11 @@ public partial class MainWindow : Window
 
     private readonly DispatcherTimer _blockTimer;
     private readonly DispatcherTimer _usageTimer;
+    private readonly DispatcherTimer _unlockTimer;
     private readonly ForegroundUsageTracker _usageTracker = new();
     private readonly HashSet<string> _activeCloseAttempts = [];
     private readonly WinForms.NotifyIcon _trayIcon;
+    private readonly Dictionary<string, DateTime> _blockUnlockExpirations = [];
     private List<ScheduledBlock> _scheduledBlocks = [];
     private BlockDragState? _activeDrag;
     private double _slotHeight = DefaultSlotHeight;
@@ -83,6 +87,13 @@ public partial class MainWindow : Window
         };
         _usageTimer.Tick += (_, _) => _usageTracker.Sample();
         _usageTimer.Start();
+
+        _unlockTimer = new DispatcherTimer
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _unlockTimer.Tick += (_, _) => RefreshUnlockTimerStatus();
+        _unlockTimer.Start();
         Closing += MainWindow_Closing;
     }
 
@@ -146,6 +157,7 @@ public partial class MainWindow : Window
         {
             _blockTimer.Stop();
             _usageTimer.Stop();
+            _unlockTimer.Stop();
             _usageTracker.FinishCurrentSession();
             _trayIcon.Visible = false;
             _trayIcon.Dispose();
@@ -197,9 +209,11 @@ public partial class MainWindow : Window
         ScheduleGrid.ColumnDefinitions.Clear();
         BlockCanvas.Children.Clear();
 
+        ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TimeColumnWidth) });
+
         for (int column = 0; column < ScheduleDays.Length; column++)
         {
-            ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 130 });
+            ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = DayColumnMinWidth });
         }
 
         ScheduleGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(TimeColumnWidth) });
@@ -224,7 +238,7 @@ public partial class MainWindow : Window
                 HorizontalAlignment = WpfHorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetColumn(header, dayIndex);
+            Grid.SetColumn(header, dayIndex + 1);
             Grid.SetRow(header, 0);
             ScheduleGrid.Children.Add(header);
         }
@@ -235,27 +249,34 @@ public partial class MainWindow : Window
             for (int dayIndex = 0; dayIndex < ScheduleDays.Length; dayIndex++)
             {
                 WpfButton slotButton = CreateSlotButton(ScheduleDays[dayIndex], minutes);
-                Grid.SetColumn(slotButton, dayIndex);
+                Grid.SetColumn(slotButton, dayIndex + 1);
                 Grid.SetRow(slotButton, slot + 1);
                 ScheduleGrid.Children.Add(slotButton);
             }
 
-            TextBlock timeLabel = new()
-            {
-                Text = minutes % 60 == 0 ? TimeHelpers.FormatMinutes(minutes) : string.Empty,
-                FontSize = 11,
-                Foreground = new SolidColorBrush(MediaColor.FromRgb(101, 112, 128)),
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(8, 1, 0, 0)
-            };
-            Grid.SetColumn(timeLabel, ScheduleDays.Length);
-            Grid.SetRow(timeLabel, slot + 1);
-            ScheduleGrid.Children.Add(timeLabel);
+            AddTimeLabel(minutes, slot + 1, column: 0, horizontalAlignment: WpfHorizontalAlignment.Right, margin: new Thickness(0, 1, 8, 0));
+            AddTimeLabel(minutes, slot + 1, column: ScheduleDays.Length + 1, horizontalAlignment: WpfHorizontalAlignment.Left, margin: new Thickness(8, 1, 0, 0));
         }
 
         ScheduleGrid.UpdateLayout();
         RenderBlockOverlays();
         StatusText.Text = $"{_scheduledBlocks.Count} scheduled blocks active";
+    }
+
+    private void AddTimeLabel(int minutes, int row, int column, WpfHorizontalAlignment horizontalAlignment, Thickness margin)
+    {
+        TextBlock timeLabel = new()
+        {
+            Text = minutes % 60 == 0 ? TimeHelpers.FormatMinutes(minutes) : string.Empty,
+            FontSize = 11,
+            Foreground = new SolidColorBrush(MediaColor.FromRgb(101, 112, 128)),
+            HorizontalAlignment = horizontalAlignment,
+            VerticalAlignment = VerticalAlignment.Top,
+            Margin = margin
+        };
+        Grid.SetColumn(timeLabel, column);
+        Grid.SetRow(timeLabel, row);
+        ScheduleGrid.Children.Add(timeLabel);
     }
 
     private static WpfButton CreateSlotButton(DayOfWeek day, int startMinutes)
@@ -295,11 +316,17 @@ public partial class MainWindow : Window
         }
 
         AppDataStore.AddScheduledBlock(window.ScheduledBlock);
+        HandleBlockSaved(window.ScheduledBlock);
         RenderSchedule();
     }
 
     private void OpenEditScheduleBlockWindow(ScheduledBlock block)
     {
+        if (!EnsureBlockCanBeModified(block))
+        {
+            return;
+        }
+
         ScheduleBlockWindow window = new(CloneScheduledBlock(block))
         {
             Owner = this
@@ -311,6 +338,7 @@ public partial class MainWindow : Window
         }
 
         AppDataStore.UpdateScheduledBlock(window.ScheduledBlock);
+        HandleBlockSaved(window.ScheduledBlock);
         RenderSchedule();
     }
 
@@ -390,6 +418,11 @@ public partial class MainWindow : Window
 
     private void DeleteScheduleBlock(ScheduledBlock block)
     {
+        if (!EnsureBlockCanBeModified(block))
+        {
+            return;
+        }
+
         MessageBoxResult result = WpfMessageBox.Show(
             this,
             $"Delete the {block.TimeRangeText} block on {block.Day}?",
@@ -403,7 +436,130 @@ public partial class MainWindow : Window
         }
 
         AppDataStore.DeleteScheduledBlock(block.Id);
+        _blockUnlockExpirations.Remove(block.Id);
+        RefreshUnlockTimerStatus();
         RenderSchedule();
+    }
+
+    private bool EnsureBlockCanBeModified(ScheduledBlock block)
+    {
+        if (!IsBlockCurrentlyActive(block) || IsBlockUnlocked(block))
+        {
+            return true;
+        }
+
+        string challenge = GenerateUnlockChallenge();
+        UnlockBlockWindow unlockWindow = new(challenge)
+        {
+            Owner = this
+        };
+
+        if (unlockWindow.ShowDialog() != true)
+        {
+            return false;
+        }
+
+        GrantBlockEditGrace(block.Id);
+        return true;
+    }
+
+    private void HandleBlockSaved(ScheduledBlock block)
+    {
+        if (IsBlockCurrentlyActive(block))
+        {
+            GrantBlockEditGrace(block.Id);
+            WpfMessageBox.Show(
+                this,
+                "This block covers the current time. You have 1 minute to edit it so it no longer covers the current timeframe before future changes require the unlock procedure again.",
+                "Current Time Covered",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        else
+        {
+            _blockUnlockExpirations.Remove(block.Id);
+            RefreshUnlockTimerStatus();
+        }
+    }
+
+    private bool IsBlockUnlocked(ScheduledBlock block)
+    {
+        if (!_blockUnlockExpirations.TryGetValue(block.Id, out DateTime expiresAt))
+        {
+            return false;
+        }
+
+        if (DateTime.Now >= expiresAt || !IsBlockCurrentlyActive(block))
+        {
+            _blockUnlockExpirations.Remove(block.Id);
+            RefreshUnlockTimerStatus();
+            return false;
+        }
+
+        return true;
+    }
+
+    private void GrantBlockEditGrace(string blockId)
+    {
+        _blockUnlockExpirations[blockId] = DateTime.Now.AddMinutes(1);
+        RefreshUnlockTimerStatus();
+    }
+
+    private void RefreshUnlockTimerStatus()
+    {
+        DateTime now = DateTime.Now;
+        Dictionary<string, ScheduledBlock> blocksById = AppDataStore.GetScheduledBlocks()
+            .ToDictionary(block => block.Id, StringComparer.OrdinalIgnoreCase);
+
+        foreach (string blockId in _blockUnlockExpirations.Keys.ToList())
+        {
+            if (_blockUnlockExpirations[blockId] <= now ||
+                !blocksById.TryGetValue(blockId, out ScheduledBlock? block) ||
+                !IsBlockCurrentlyActive(block))
+            {
+                _blockUnlockExpirations.Remove(blockId);
+            }
+        }
+
+        if (_blockUnlockExpirations.Count == 0)
+        {
+            UnlockTimerBadge.Visibility = Visibility.Collapsed;
+            UnlockTimerText.Text = string.Empty;
+            return;
+        }
+
+        TimeSpan remaining = _blockUnlockExpirations.Values.Min() - now;
+        if (remaining < TimeSpan.Zero)
+        {
+            remaining = TimeSpan.Zero;
+        }
+
+        UnlockTimerBadge.Visibility = Visibility.Visible;
+        UnlockTimerText.Text = $"Edit grace: {remaining.Minutes:D1}:{remaining.Seconds:D2}";
+    }
+
+    private static bool IsBlockCurrentlyActive(ScheduledBlock block)
+    {
+        DateTime now = DateTime.Now;
+        int currentMinutes = (now.Hour * 60) + now.Minute;
+        return block.Day == now.DayOfWeek &&
+               block.StartMinutes <= currentMinutes &&
+               currentMinutes < block.EndMinutes;
+    }
+
+    private static string GenerateUnlockChallenge()
+    {
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+        Span<byte> bytes = stackalloc byte[32];
+        RandomNumberGenerator.Fill(bytes);
+
+        char[] characters = new char[32];
+        for (int index = 0; index < characters.Length; index++)
+        {
+            characters[index] = alphabet[bytes[index] % alphabet.Length];
+        }
+
+        return new string(characters);
     }
 
     private static TextBlock CreateBlockText(ScheduledBlock block)
@@ -425,8 +581,9 @@ public partial class MainWindow : Window
             return;
         }
 
-        double columnLeft = GetColumnLeft(dayColumn);
-        double columnWidth = ScheduleGrid.ColumnDefinitions[dayColumn].ActualWidth;
+        int gridColumn = dayColumn + 1;
+        double columnLeft = GetColumnLeft(gridColumn);
+        double columnWidth = ScheduleGrid.ColumnDefinitions[gridColumn].ActualWidth;
         double laneAreaWidth = Math.Max(48, columnWidth * BlockWidthRatio);
         double laneWidth = Math.Max(36, laneAreaWidth / Math.Max(1, layout.LaneCount));
         double left = columnLeft + (layout.Lane * laneWidth) + 3;
@@ -457,6 +614,12 @@ public partial class MainWindow : Window
         WpfPoint positionInBlock = e.GetPosition(blockPanel);
         BlockDragMode mode = GetDragMode(positionInBlock, blockPanel.ActualHeight);
         ScheduledBlock block = state.Block;
+
+        if (!EnsureBlockCanBeModified(block))
+        {
+            e.Handled = true;
+            return;
+        }
 
         _activeDrag = new BlockDragState(
             block,
@@ -534,6 +697,7 @@ public partial class MainWindow : Window
 
         blockPanel.ReleaseMouseCapture();
         AppDataStore.UpdateScheduledBlock(_activeDrag.Block);
+        HandleBlockSaved(_activeDrag.Block);
         _activeDrag = null;
         RenderSchedule();
         e.Handled = true;
@@ -558,8 +722,9 @@ public partial class MainWindow : Window
     {
         for (int dayIndex = 0; dayIndex < ScheduleDays.Length; dayIndex++)
         {
-            double left = GetColumnLeft(dayIndex);
-            double right = left + ScheduleGrid.ColumnDefinitions[dayIndex].ActualWidth;
+            int gridColumn = dayIndex + 1;
+            double left = GetColumnLeft(gridColumn);
+            double right = left + ScheduleGrid.ColumnDefinitions[gridColumn].ActualWidth;
             if (x >= left && x <= right)
             {
                 return ScheduleDays[dayIndex];

@@ -1,0 +1,35 @@
+<Window x:Class="ProductivityApp.UnlockBlockWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Unlock Block Editing" Height="300" Width="560" MinHeight="280" MinWidth="500"
+        WindowStartupLocation="CenterOwner" Background="#F6F7F9">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="This block is active right now." FontSize="20" FontWeight="SemiBold" Foreground="#242A31"/>
+        <TextBlock Grid.Row="1" Text="Type the exact case-sensitive unlock string below to modify it."
+                   Foreground="#657080" Margin="0,6,0,14" TextWrapping="Wrap"/>
+
+        <Border Grid.Row="2" Background="#FFFFFF" BorderBrush="#DDE2EA" BorderThickness="1" Padding="12">
+            <TextBlock x:Name="ChallengeText" FontFamily="Consolas" FontSize="18" FontWeight="SemiBold"
+                       TextWrapping="Wrap" IsHitTestVisible="False"/>
+        </Border>
+
+        <StackPanel Grid.Row="3" Margin="0,16,0,0">
+            <TextBox x:Name="ChallengeInput" Height="36" VerticalContentAlignment="Center" FontFamily="Consolas"
+                     ContextMenu="{x:Null}" PreviewKeyDown="ChallengeInput_PreviewKeyDown"/>
+            <TextBlock x:Name="ValidationText" Foreground="#B3261E" Margin="0,8,0,0"/>
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="Cancel" Width="84" Height="34" Margin="0,0,8,0" IsCancel="True"/>
+            <Button Content="Unlock" Width="84" Height="34" Click="UnlockButton_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
