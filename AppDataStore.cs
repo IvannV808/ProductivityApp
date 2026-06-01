@@ -1,10 +1,15 @@
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace ProductivityApp;
 
 public static class AppDataStore
 {
+    private const int PasswordHashIterations = 210_000;
+    private const int PasswordSaltLength = 16;
+    private const int PasswordHashLength = 32;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
@@ -29,7 +34,10 @@ public static class AppDataStore
         lock (SyncLock)
         {
             return LoadTargetAppsDatabase().Apps
+                .Select(NormalizeTargetApp)
                 .Where(AppBlockRules.IsAllowedBlockingCandidate)
+                .GroupBy(app => app.ProcessName, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase).First())
                 .OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase)
                 .ToList();
         }
@@ -46,17 +54,18 @@ public static class AppDataStore
 
             foreach (TargetApp app in apps)
             {
-                if (string.IsNullOrWhiteSpace(app.ProcessName) ||
-                    !AppBlockRules.IsAllowedBlockingCandidate(app) ||
-                    !existing.Add(app.ProcessName))
+                TargetApp normalizedApp = NormalizeTargetApp(app);
+                if (string.IsNullOrWhiteSpace(normalizedApp.ProcessName) ||
+                    !AppBlockRules.IsAllowedBlockingCandidate(normalizedApp) ||
+                    !existing.Add(normalizedApp.ProcessName))
                 {
                     continue;
                 }
 
                 database.Apps.Add(new TargetApp
                 {
-                    ProcessName = app.ProcessName,
-                    DisplayName = string.IsNullOrWhiteSpace(app.DisplayName) ? app.ProcessName : app.DisplayName,
+                    ProcessName = normalizedApp.ProcessName,
+                    DisplayName = string.IsNullOrWhiteSpace(normalizedApp.DisplayName) ? normalizedApp.ProcessName : normalizedApp.DisplayName,
                     AddedAt = DateTime.Now
                 });
             }
@@ -183,6 +192,80 @@ public static class AppDataStore
         }
     }
 
+    public static bool HasMasterPassword()
+    {
+        lock (SyncLock)
+        {
+            return LoadProductivityDatabase().MasterPassword is not null;
+        }
+    }
+
+    public static void SetMasterPassword(string password)
+    {
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            throw new ArgumentException("Password cannot be empty.", nameof(password));
+        }
+
+        byte[] salt = RandomNumberGenerator.GetBytes(PasswordSaltLength);
+        byte[] hash = HashPassword(password, salt, PasswordHashIterations);
+
+        lock (SyncLock)
+        {
+            ProductivityDatabase database = LoadProductivityDatabase();
+            database.MasterPassword = new MasterPasswordCredential
+            {
+                Salt = Convert.ToBase64String(salt),
+                Hash = Convert.ToBase64String(hash),
+                Iterations = PasswordHashIterations,
+                UpdatedAt = DateTime.Now
+            };
+            Save(ProductivityDataPath, database);
+        }
+    }
+
+    public static void ClearMasterPassword()
+    {
+        lock (SyncLock)
+        {
+            ProductivityDatabase database = LoadProductivityDatabase();
+            database.MasterPassword = null;
+            Save(ProductivityDataPath, database);
+        }
+    }
+
+    public static bool ValidateMasterPassword(string password)
+    {
+        if (string.IsNullOrEmpty(password))
+        {
+            return false;
+        }
+
+        lock (SyncLock)
+        {
+            MasterPasswordCredential? credential = LoadProductivityDatabase().MasterPassword;
+            if (credential is null ||
+                string.IsNullOrWhiteSpace(credential.Salt) ||
+                string.IsNullOrWhiteSpace(credential.Hash) ||
+                credential.Iterations <= 0)
+            {
+                return false;
+            }
+
+            try
+            {
+                byte[] salt = Convert.FromBase64String(credential.Salt);
+                byte[] expectedHash = Convert.FromBase64String(credential.Hash);
+                byte[] actualHash = HashPassword(password, salt, credential.Iterations);
+                return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
     public static void RecordClosure(AppClosureEvent closureEvent)
     {
         lock (SyncLock)
@@ -207,25 +290,103 @@ public static class AppDataStore
             }
             else
             {
-                RemoveDisallowedTargetApps();
+                NormalizeTargetAppsDatabase();
             }
 
             if (!File.Exists(ProductivityDataPath))
             {
                 Save(ProductivityDataPath, new ProductivityDatabase());
             }
+            else
+            {
+                NormalizeProductivityDatabase();
+            }
         }
     }
 
-    private static void RemoveDisallowedTargetApps()
+    private static void NormalizeTargetAppsDatabase()
     {
         TargetAppsDatabase database = LoadTargetAppsDatabase();
-        int removedCount = database.Apps.RemoveAll(app => !AppBlockRules.IsAllowedBlockingCandidate(app));
-        if (removedCount > 0)
+        List<TargetApp> normalizedApps = database.Apps
+            .Select(NormalizeTargetApp)
+            .Where(AppBlockRules.IsAllowedBlockingCandidate)
+            .GroupBy(app => app.ProcessName, StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase).First())
+            .ToList();
+
+        if (!TargetAppsEqual(database.Apps, normalizedApps))
         {
+            database.Apps = normalizedApps;
             Save(TargetAppsPath, database);
         }
     }
+
+    private static void NormalizeProductivityDatabase()
+    {
+        ProductivityDatabase database = LoadProductivityDatabase();
+        bool changed = false;
+
+        foreach (ScheduledBlock block in database.ScheduledBlocks)
+        {
+            List<string> normalizedProcesses = block.TargetProcessNames
+                .Where(processName => !string.IsNullOrWhiteSpace(processName))
+                .Select(AppBlockRules.NormalizeTargetProcessName)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (!block.TargetProcessNames.SequenceEqual(normalizedProcesses, StringComparer.OrdinalIgnoreCase))
+            {
+                block.TargetProcessNames = normalizedProcesses;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            Save(ProductivityDataPath, database);
+        }
+    }
+
+    private static TargetApp NormalizeTargetApp(TargetApp app)
+    {
+        string processName = AppBlockRules.NormalizeTargetProcessName(app.ProcessName);
+        string displayName = RunningAppNameResolver.GetFriendlyDisplayName(processName, app.DisplayName);
+
+        return new TargetApp
+        {
+            ProcessName = processName,
+            DisplayName = displayName,
+            AddedAt = app.AddedAt
+        };
+    }
+
+    private static bool TargetAppsEqual(IReadOnlyList<TargetApp> first, IReadOnlyList<TargetApp> second)
+    {
+        if (first.Count != second.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < first.Count; index++)
+        {
+            if (!string.Equals(first[index].ProcessName, second[index].ProcessName, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(first[index].DisplayName, second[index].DisplayName, StringComparison.Ordinal) ||
+                first[index].AddedAt != second[index].AddedAt)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static byte[] HashPassword(string password, byte[] salt, int iterations) =>
+        Rfc2898DeriveBytes.Pbkdf2(
+            password,
+            salt,
+            iterations,
+            HashAlgorithmName.SHA256,
+            PasswordHashLength);
 
     private static void MigrateLegacyDatabase(string legacyPath, string newPath)
     {

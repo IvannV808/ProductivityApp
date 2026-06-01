@@ -66,6 +66,7 @@ public partial class MainWindow : Window
     private double _slotHeight = DefaultSlotHeight;
     private DateTime _nextMotivationMessageAt = DateTime.MinValue;
     private bool _isExitRequested;
+    private bool _isExitCleanupComplete;
 
     public MainWindow()
     {
@@ -97,6 +98,7 @@ public partial class MainWindow : Window
         _unlockTimer.Tick += (_, _) => RefreshUnlockTimerStatus();
         _unlockTimer.Start();
         Closing += MainWindow_Closing;
+        System.Windows.Application.Current.Exit += (_, _) => CleanupForExit();
     }
 
     private void SetWindowIcon()
@@ -159,19 +161,31 @@ public partial class MainWindow : Window
 
     private void MainWindow_Closing(object? sender, CancelEventArgs e)
     {
-        if (_isExitRequested)
+        if (_isExitRequested || Debugger.IsAttached)
         {
-            _blockTimer.Stop();
-            _usageTimer.Stop();
-            _unlockTimer.Stop();
-            _usageTracker.FinishCurrentSession();
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
+            _isExitRequested = true;
+            CleanupForExit();
             return;
         }
 
         e.Cancel = true;
         Hide();
+    }
+
+    private void CleanupForExit()
+    {
+        if (_isExitCleanupComplete)
+        {
+            return;
+        }
+
+        _isExitCleanupComplete = true;
+        _blockTimer.Stop();
+        _usageTimer.Stop();
+        _unlockTimer.Stop();
+        _usageTracker.FinishCurrentSession();
+        _trayIcon.Visible = false;
+        _trayIcon.Dispose();
     }
 
     private void ShowMainWindowFromTray()
@@ -183,6 +197,18 @@ public partial class MainWindow : Window
 
     private void ExitFromTray()
     {
+        ShowMainWindowFromTray();
+
+        ExitChallengeWindow window = new(GenerateUnlockChallenge())
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() != true)
+        {
+            return;
+        }
+
         _isExitRequested = true;
         Close();
         System.Windows.Application.Current.Shutdown();
@@ -200,6 +226,15 @@ public partial class MainWindow : Window
     private void MetricsButton_Click(object sender, RoutedEventArgs e)
     {
         ShowMetricsWindow();
+    }
+
+    private void PasswordSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        PasswordSettingsWindow window = new()
+        {
+            Owner = this
+        };
+        window.ShowDialog();
     }
 
     private void ShowMetricsWindow()
@@ -365,6 +400,28 @@ public partial class MainWindow : Window
         RenderSchedule();
     }
 
+    private void OpenAddAppsScheduleBlockWindow(ScheduledBlock block)
+    {
+        if (!EnsureBlockCanBeModified(block))
+        {
+            return;
+        }
+
+        ScheduleBlockWindow window = new(CloneScheduledBlock(block), ScheduleBlockEditMode.AddOnly)
+        {
+            Owner = this
+        };
+
+        if (window.ShowDialog() != true || window.ScheduledBlock is null)
+        {
+            return;
+        }
+
+        AppDataStore.UpdateScheduledBlock(window.ScheduledBlock);
+        HandleBlockSaved(window.ScheduledBlock);
+        RenderSchedule();
+    }
+
     private void ScheduleGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         RenderBlockOverlays();
@@ -423,6 +480,11 @@ public partial class MainWindow : Window
             Header = "Edit"
         };
         editItem.Click += (_, _) => OpenEditScheduleBlockWindow(block);
+        WpfMenuItem editAddItem = new()
+        {
+            Header = "Edit-Add"
+        };
+        editAddItem.Click += (_, _) => OpenAddAppsScheduleBlockWindow(block);
         WpfMenuItem deleteItem = new()
         {
             Header = "Delete"
@@ -430,7 +492,7 @@ public partial class MainWindow : Window
         deleteItem.Click += (_, _) => DeleteScheduleBlock(block);
         blockPanel.ContextMenu = new WpfContextMenu
         {
-            Items = { editItem, deleteItem }
+            Items = { editItem, editAddItem, deleteItem }
         };
 
         blockPanel.MouseMove += BlockPanel_MouseMove;
@@ -872,18 +934,30 @@ public partial class MainWindow : Window
         {
             foreach (string processName in block.TargetProcessNames)
             {
-                if (string.Equals(processName, currentProcessName, StringComparison.OrdinalIgnoreCase))
+                string targetProcessName = AppBlockRules.NormalizeTargetProcessName(processName);
+                if (string.Equals(targetProcessName, currentProcessName, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                await CloseMatchingProcessesAsync(block, processName);
+                await CloseMatchingProcessesAsync(block, targetProcessName);
             }
         }
     }
 
     private async Task CloseMatchingProcessesAsync(ScheduledBlock block, string processName)
     {
+        processName = AppBlockRules.NormalizeTargetProcessName(processName);
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return;
+        }
+
+        if (AppBlockRules.ShouldSkipDirectProcessClosure(processName))
+        {
+            return;
+        }
+
         Process[] processes;
         try
         {

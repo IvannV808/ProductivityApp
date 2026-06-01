@@ -44,6 +44,9 @@
                             Padding="10,5" Margin="0,0,14,0" Visibility="Collapsed">
                         <TextBlock x:Name="UnlockTimerText" Foreground="#7A4B00" FontWeight="SemiBold"/>
                     </Border>
+                    <Button Content="⚙" Width="34" Height="34" Margin="0,0,12,0"
+                            FontSize="18" ToolTip="Master password settings"
+                            Click="PasswordSettingsButton_Click"/>
                     <TextBlock Text="Zoom" VerticalAlignment="Center" Foreground="#657080" Margin="0,0,8,0"/>
                     <Slider x:Name="ZoomSlider" Width="150" Minimum="16" Maximum="52" Value="26"
                             TickFrequency="2" IsSnapToTickEnabled="True" ValueChanged="ZoomSlider_ValueChanged"/>

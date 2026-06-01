@@ -48,7 +48,7 @@ public sealed class RunningAppInfo
     {
         try
         {
-            string processName = process.ProcessName;
+            string processName = AppBlockRules.NormalizeTargetProcessName(process.ProcessName);
 
             if (string.IsNullOrWhiteSpace(processName))
             {
@@ -123,6 +123,18 @@ public static class RunningAppNameResolver
         return CleanDisplayName(processName);
     }
 
+    public static string GetFriendlyDisplayName(string processName, string fallbackDisplayName)
+    {
+        if (KnownDisplayNames.TryGetValue(processName, out string? knownDisplayName))
+        {
+            return knownDisplayName;
+        }
+
+        return string.IsNullOrWhiteSpace(fallbackDisplayName)
+            ? CleanDisplayName(processName)
+            : CleanDisplayName(fallbackDisplayName);
+    }
+
     private static string? FirstUsefulName(params string?[] names)
     {
         return names.FirstOrDefault(name =>
@@ -142,11 +154,32 @@ public static class RunningAppNameResolver
 
 public static class AppBlockRules
 {
+    private static readonly IReadOnlyDictionary<string, string> TargetProcessAliases = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        ["steamwebhelper"] = "steam"
+    };
+
     private static readonly string[] BlockedDisplayNames =
     [
         "Microsoft Windows Operating System",
         "Windows Operating System"
     ];
+
+    public static string NormalizeTargetProcessName(string processName)
+    {
+        if (string.IsNullOrWhiteSpace(processName))
+        {
+            return string.Empty;
+        }
+
+        string trimmedProcessName = processName.Trim();
+        return TargetProcessAliases.TryGetValue(trimmedProcessName, out string? alias)
+            ? alias
+            : trimmedProcessName;
+    }
+
+    public static bool ShouldSkipDirectProcessClosure(string processName) =>
+        string.Equals(processName, "steamwebhelper", StringComparison.OrdinalIgnoreCase);
 
     public static bool IsAllowedBlockingCandidate(RunningAppInfo app) =>
         IsAllowedBlockingCandidate(app.ProcessName, app.DisplayName);
@@ -291,6 +324,16 @@ public sealed class ProductivityDatabase
     public List<ScheduledBlock> ScheduledBlocks { get; set; } = [];
     public List<AppClosureEvent> ClosureEvents { get; set; } = [];
     public List<AppUsageSession> UsageSessions { get; set; } = [];
+    public MasterPasswordCredential? MasterPassword { get; set; }
+}
+
+public sealed class MasterPasswordCredential
+{
+    public string Salt { get; set; } = string.Empty;
+    public string Hash { get; set; } = string.Empty;
+    public int Iterations { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }
 
 public static class TimeHelpers

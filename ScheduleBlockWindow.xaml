@@ -14,7 +14,7 @@
 
         <StackPanel>
             <TextBlock x:Name="DayText" FontSize="20" FontWeight="SemiBold" Foreground="#242A31"/>
-            <TextBlock Text="Choose a time range and the apps to close during that block."
+            <TextBlock x:Name="DescriptionText" Text="Choose a time range and the apps to close during that block."
                        Foreground="#657080" Margin="0,4,0,0" TextWrapping="Wrap"/>
         </StackPanel>
 
@@ -49,6 +49,7 @@
                     <ListBox.ItemTemplate>
                         <DataTemplate>
                             <CheckBox IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      IsEnabled="{Binding CanChangeSelection}"
                                       Content="{Binding DisplayName}" Margin="0,3"/>
                         </DataTemplate>
                     </ListBox.ItemTemplate>

@@ -23,23 +23,59 @@ public partial class ScheduleBlockWindow : Window
     }
 
     public ScheduleBlockWindow(ScheduledBlock block)
-        : this(block, isEdit: true)
+        : this(block, ScheduleBlockEditMode.Full)
+    {
+    }
+
+    public ScheduleBlockWindow(ScheduledBlock block, ScheduleBlockEditMode editMode)
+        : this(block, isEdit: true, editMode)
     {
     }
 
     private ScheduleBlockWindow(ScheduledBlock block, bool isEdit)
+        : this(block, isEdit, ScheduleBlockEditMode.Full)
+    {
+    }
+
+    private ScheduleBlockWindow(ScheduledBlock block, bool isEdit, ScheduleBlockEditMode editMode)
     {
         InitializeComponent();
 
         _colorHex = block.ColorHex;
         _existingBlockId = isEdit ? block.Id : null;
         _createdAt = isEdit ? block.CreatedAt : null;
-        _targetApps = AppDataStore.GetTargetApps()
-            .Select(app => new SelectableTargetApp(app, block.TargetProcessNames.Contains(app.ProcessName, StringComparer.OrdinalIgnoreCase)))
+
+        List<TargetApp> availableTargetApps = AppDataStore.GetTargetApps().ToList();
+        HashSet<string> availableProcessNames = availableTargetApps
+            .Select(app => app.ProcessName)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (string processName in block.TargetProcessNames.Where(processName => !availableProcessNames.Contains(processName)))
+        {
+            availableTargetApps.Add(new TargetApp
+            {
+                ProcessName = processName,
+                DisplayName = RunningAppNameResolver.GetFriendlyDisplayName(processName, processName)
+            });
+        }
+
+        _targetApps = availableTargetApps
+            .OrderBy(app => app.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Select(app =>
+            {
+                bool isSelected = block.TargetProcessNames.Contains(app.ProcessName, StringComparer.OrdinalIgnoreCase);
+                return new SelectableTargetApp(
+                    app,
+                    isSelected,
+                    canChangeSelection: editMode != ScheduleBlockEditMode.AddOnly || !isSelected);
+            })
             .ToList();
 
-        Title = isEdit ? "Edit Schedule Block" : "Schedule Block";
+        Title = editMode == ScheduleBlockEditMode.AddOnly ? "Edit-Add Schedule Block" : isEdit ? "Edit Schedule Block" : "Schedule Block";
         DayText.Text = block.Day.ToString();
+        DescriptionText.Text = editMode == ScheduleBlockEditMode.AddOnly
+            ? "Add target apps to this block. Apps already in the block cannot be removed here."
+            : "Choose a time range and the apps to close during that block.";
         PopulateTimeOptions(block.StartMinutes, block.EndMinutes);
         TargetAppsList.ItemsSource = _targetApps;
         EmptyAppsText.Visibility = _targetApps.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -117,16 +153,24 @@ public partial class ScheduleBlockWindow : Window
 
 public sealed class SelectableTargetApp
 {
-    public SelectableTargetApp(TargetApp targetApp, bool isSelected = false)
+    public SelectableTargetApp(TargetApp targetApp, bool isSelected = false, bool canChangeSelection = true)
     {
         ProcessName = targetApp.ProcessName;
         DisplayName = targetApp.DisplayName;
         IsSelected = isSelected;
+        CanChangeSelection = canChangeSelection;
     }
 
     public string ProcessName { get; }
     public string DisplayName { get; }
     public bool IsSelected { get; set; }
+    public bool CanChangeSelection { get; }
+}
+
+public enum ScheduleBlockEditMode
+{
+    Full,
+    AddOnly
 }
 
 public sealed record TimeOption(int Minutes)

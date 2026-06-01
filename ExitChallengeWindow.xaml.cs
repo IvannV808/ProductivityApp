@@ -5,16 +5,18 @@ using WpfKeyEventArgs = System.Windows.Input.KeyEventArgs;
 
 namespace ProductivityApp;
 
-public partial class UnlockBlockWindow : Window
+public partial class ExitChallengeWindow : Window
 {
     private readonly string _challenge;
     private readonly bool _hasMasterPassword;
 
-    public UnlockBlockWindow(string challenge)
+    public ExitChallengeWindow(string challenge)
     {
         InitializeComponent();
+
         _challenge = challenge;
         _hasMasterPassword = AppDataStore.HasMasterPassword();
+
         ChallengeText.Text = challenge;
         PasswordInput.IsEnabled = _hasMasterPassword;
         PasswordUnavailableText.Visibility = _hasMasterPassword ? Visibility.Collapsed : Visibility.Visible;
@@ -42,7 +44,7 @@ public partial class UnlockBlockWindow : Window
         }
     }
 
-    private void UnlockButton_Click(object sender, RoutedEventArgs e)
+    private void ExitButton_Click(object sender, RoutedEventArgs e)
     {
         if (string.Equals(ChallengeInput.Text, _challenge, StringComparison.Ordinal) ||
             (_hasMasterPassword && AppDataStore.ValidateMasterPassword(PasswordInput.Password)))
@@ -52,8 +54,8 @@ public partial class UnlockBlockWindow : Window
         }
 
         ValidationText.Text = _hasMasterPassword
-            ? "The unlock string or master password does not match."
-            : "The unlock string does not match.";
+            ? "The randomized string or master password does not match."
+            : "The randomized string does not match.";
 
         if (!string.IsNullOrEmpty(ChallengeInput.Text))
         {
